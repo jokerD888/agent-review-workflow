@@ -1,0 +1,48 @@
+{
+  "name": "agent-review-workflow",
+  "displayName": "Agent Review Workflow",
+  "description": "Review AI coding tasks against their recorded ARW base.",
+  "version": "0.2.0",
+  "publisher": "jokerd888",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/jokerD888/agent-review-workflow.git" },
+  "engines": { "vscode": "^1.95.0" },
+  "categories": ["SCM Providers", "Other"],
+  "activationEvents": ["onView:agentReviewWorkflow.tasks", "onCommand:agentReviewWorkflow.openTaskReview"],
+  "main": "./out/extension.js",
+  "files": ["out", "resources", "package.json", "LICENSE"],
+  "contributes": {
+    "configuration": {
+      "title": "Agent Review Workflow",
+      "properties": {
+        "agentReviewWorkflow.arwPath": { "type": "string", "default": "arw", "description": "Path or command name for the ARW CLI." }
+      }
+    },
+    "viewsContainers": { "activitybar": [{ "id": "agentReviewWorkflow", "title": "Agent Review", "icon": "resources/arw.svg" }] },
+    "views": { "agentReviewWorkflow": [{ "id": "agentReviewWorkflow.tasks", "name": "Tasks" }] },
+    "commands": [
+      { "command": "agentReviewWorkflow.refresh", "title": "ARW: Refresh Tasks", "icon": "$(refresh)" },
+      { "command": "agentReviewWorkflow.reviewCurrentTask", "title": "ARW: Review Current Task" },
+      { "command": "agentReviewWorkflow.openTaskReview", "title": "ARW: Open Task Review" },
+      { "command": "agentReviewWorkflow.openTaskWorktree", "title": "ARW: Open Task in New Window" },
+      { "command": "agentReviewWorkflow.openFileDiff", "title": "ARW: Open File Diff" },
+      { "command": "agentReviewWorkflow.showDependencyGraph", "title": "ARW: View Task Dependencies" },
+      { "command": "agentReviewWorkflow.parkTask", "title": "ARW: Park Task" },
+      { "command": "agentReviewWorkflow.approveTask", "title": "ARW: Record Review Approval" },
+      { "command": "agentReviewWorkflow.requestChanges", "title": "ARW: Request Changes" }
+    ],
+    "menus": {
+      "view/title": [{ "command": "agentReviewWorkflow.refresh", "when": "view == agentReviewWorkflow.tasks", "group": "navigation" }],
+      "view/item/context": [
+        { "command": "agentReviewWorkflow.openTaskReview", "when": "view == agentReviewWorkflow.tasks && viewItem == arwTask", "group": "inline" },
+        { "command": "agentReviewWorkflow.openFileDiff", "when": "view == agentReviewWorkflow.tasks && viewItem == arwFile", "group": "inline" },
+        { "command": "agentReviewWorkflow.openTaskWorktree", "when": "view == agentReviewWorkflow.tasks && viewItem == arwTask", "group": "arw@1" },
+        { "command": "agentReviewWorkflow.parkTask", "when": "view == agentReviewWorkflow.tasks && viewItem == arwTask", "group": "arw@2" },
+        { "command": "agentReviewWorkflow.approveTask", "when": "view == agentReviewWorkflow.tasks && viewItem == arwTask", "group": "arw@3" },
+        { "command": "agentReviewWorkflow.requestChanges", "when": "view == agentReviewWorkflow.tasks && viewItem == arwTask", "group": "arw@4" }
+      ]
+    }
+  },
+  "scripts": { "compile": "tsc -p ./", "check": "tsc -p ./ --noEmit", "package": "npm run compile && npx @vscode/vsce package --no-dependencies" },
+  "devDependencies": { "@types/node": "^22.10.1", "@types/vscode": "^1.95.0", "@vscode/vsce": "^3.2.1", "typescript": "^5.7.2" }
+}

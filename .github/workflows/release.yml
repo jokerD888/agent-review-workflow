@@ -1,0 +1,38 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with: { go-version: "1.26.x" }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: vscode-extension/package-lock.json }
+      - name: Build ARW binaries
+        shell: bash
+        run: |
+          mkdir -p dist
+          GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o dist/arw_windows_amd64.exe ./cmd/arw
+          GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o dist/arw_linux_amd64 ./cmd/arw
+          GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o dist/arw_linux_arm64 ./cmd/arw
+          GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o dist/arw-mcp_windows_amd64.exe ./cmd/arw-mcp
+          GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o dist/arw-mcp_linux_amd64 ./cmd/arw-mcp
+          GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o dist/arw-mcp_linux_arm64 ./cmd/arw-mcp
+      - name: Build VS Code extension
+        working-directory: vscode-extension
+        run: npm ci && npm run package && cp *.vsix ../dist/agent-review-workflow-${{ github.ref_name }}.vsix
+      - name: Create checksums
+        working-directory: dist
+        run: sha256sum * > checksums.txt
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: dist/*

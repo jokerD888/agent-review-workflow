@@ -43,3 +43,20 @@
 - Expect the user to review the accumulated task-branch diff before merge.
 - The user retains final approval for merge, push, release, credential changes,
   destructive operations, and externally visible changes.
+
+## ARW v2 task workflow
+
+- When `arw` and its typed `arw-mcp` tools are available in a Git repository,
+  read `workflow_context` before starting AI work on a named task.
+- Map a clear user intent such as “开始修复登录跳转” only to
+  `workflow_start_task`; map review requests to `workflow_prepare_review`.
+  Never pass arbitrary shell text to ARW.
+- For “在 VS Code 中审查 …”, prepare the review first, then use
+  `workflow_open_review` with a new window. Do not change the current VS Code
+  window's branch or worktree.
+- If a task depends on an unapproved parent, explain that reviewing it is
+  conditional and recommend reviewing the parent first. The user may still
+  choose to review the child.
+- A user saying “搁置” or “恢复” is sufficient intent for the corresponding
+  typed task operation. A user saying “审查通过” must be treated as a human
+  conclusion only; it never authorizes merge or push.

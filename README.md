@@ -1,8 +1,40 @@
 # Agent Review Workflow
 
 A portable, Git-first workflow for reviewing code written by Codex, Claude Code,
-and OpenCode. It keeps AI work on a task branch, creates meaningful local
-checkpoints, and makes the final accumulated diff easy to review in an IDE.
+and OpenCode. v2 tracks each unit of work as a task with a recorded base,
+dependency chain, review history, and dedicated worktree.
+
+> v2 is under active development. Its accepted architecture is documented in
+> [the final solution design](docs/FINAL-SOLUTION-DESIGN.zh-CN.md). The original
+> script workflow remains available as v1 compatibility only; do not mix its
+> write commands with the v2 task ledger in one repository.
+
+## v2 development quick start
+
+Requirements: Git and Go 1.26+. From a Git repository with an initial `main`
+commit, build ARW and create the first task:
+
+```powershell
+go build -o .\bin\arw.exe .\cmd\arw
+.\bin\arw.exe setup
+.\bin\arw.exe task start --id fix-login-redirect "修复登录跳转"
+.\bin\arw.exe task list --format json
+```
+
+`arw setup` creates the local `arw/registry` branch. Task records live there,
+not in product commits. `arw task start` makes a branch and a separate
+worktree; it neither changes `main` nor pushes anything.
+
+For a review, run `arw review prepare <task-id>`. It returns the exact recorded
+base and task HEAD, commits, changed files, dirty-worktree status, dependency
+state, test evidence, and risks. A child task is conditionally reviewable until
+its parent has final approval. `arw review approve --confirm <task-id>` records
+a human conclusion only; it cannot merge or push.
+
+The TypeScript extension is in `vscode-extension/`. Run `npm ci && npm run
+package` there, then install the generated VSIX. It displays the task tree and
+opens immutable Git-SHA-to-Git-SHA native VS Code diffs, so the visible diff is
+not accidentally based on whichever branch is currently open.
 
 ## What this installs
 
@@ -48,7 +80,28 @@ helper deliberately refuses to create a task branch from a dirty working tree.
 The installer also installs the short `arw` command into your user PATH. Open a
 new terminal after installation, then run `arw help`.
 
-## Install directly from GitHub
+## v2 release installation
+
+After the first signed v2 release is published, install only versioned Release
+assets (never a mutable `main` script). The installers download the matching
+binary, verify `checksums.txt`, add its user-local `bin` directory to PATH, and
+can install the VSIX:
+
+```powershell
+irm https://raw.githubusercontent.com/jokerD888/agent-review-workflow/main/installers/install.ps1 -OutFile install-arw.ps1
+.\install-arw.ps1 -InstallExtension
+```
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/jokerD888/agent-review-workflow/main/installers/install.sh
+sh install.sh --with-extension
+```
+
+Use `--version vX.Y.Z` to pin a release; use `--force` only to replace an
+existing ARW installation. `arw update` is intentionally not available until a
+release has been verified; rerun the versioned installer instead.
+
+## v1 installation (compatibility only)
 
 For a quick user-level installation on Windows, run:
 
@@ -119,6 +172,12 @@ templates/opencode-reviewer.md   Read-only OpenCode reviewer template
 install.ps1 / install.sh         Idempotent installers and CLI bootstrap
 arw.ps1 / arw.sh                 Cross-platform `arw` command dispatchers
 scripts/                         Start-task and review helpers
+cmd/arw/                         v2 Go CLI
+cmd/arw-mcp/                     v2 stdio MCP server
+internal/                        v2 Git, ledger, task, review, worktree logic
+schemas/                         JSON contracts for tasks and review snapshots
+vscode-extension/                v2 VS Code task and diff UI
+integrations/                    Natural-language rules for each supported agent
 ```
 
 ## License

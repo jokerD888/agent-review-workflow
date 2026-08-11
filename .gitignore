@@ -1,3 +1,14 @@
-.DS_Store
-Thumbs.db
-*.log
+# Go build outputs
+bin/
+*.exe
+*.test
+coverage.out
+
+# VS Code extension build outputs
+vscode-extension/out/
+vscode-extension/*.vsix
+vscode-extension/node_modules/
+
+# Local ARW state and review artifacts
+.git/arw/
+.agent-review/reviews/
