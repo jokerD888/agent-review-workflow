@@ -45,6 +45,9 @@ my-project/
 Review and commit the generated project files before using `start-task`; the
 helper deliberately refuses to create a task branch from a dirty working tree.
 
+The installer also installs the short `arw` command into your user PATH. Open a
+new terminal after installation, then run `arw help`.
+
 ## Install directly from GitHub
 
 For a quick user-level installation on Windows, run:
@@ -75,7 +78,7 @@ chmod +x install.sh
 Start a focused task branch from `main` (or provide another base branch):
 
 ```powershell
-./scripts/start-task.ps1 -Name "fix login redirect"
+arw start "fix login redirect"
 ```
 
 Give the agent the business task. The installed rules tell it to avoid protected
@@ -85,7 +88,7 @@ local commits only at meaningful testable checkpoints.
 When ready to review, inspect the whole branch before merging:
 
 ```powershell
-./scripts/review.ps1 -OpenVSCode
+arw review -OpenVSCode
 ```
 
 The review helper shows the diff stat, commits, whitespace errors, and opens the
@@ -113,7 +116,8 @@ rules/global.md                  Shared user-level behavior
 templates/AGENTS.md              Project-level shared template
 templates/CLAUDE.md              Claude Code compatibility shim
 templates/opencode-reviewer.md   Read-only OpenCode reviewer template
-install.ps1 / install.sh         Idempotent installers
+install.ps1 / install.sh         Idempotent installers and CLI bootstrap
+arw.ps1 / arw.sh                 Cross-platform `arw` command dispatchers
 scripts/                         Start-task and review helpers
 ```
 

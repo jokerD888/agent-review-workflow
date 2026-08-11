@@ -3,7 +3,8 @@ param(
     [string]$ProjectPath,
     [switch]$GlobalOnly,
     [switch]$InstallOpenCodeReviewer,
-    [string]$UserHomePath
+    [string]$UserHomePath,
+    [switch]$Update
 )
 
 $ErrorActionPreference = 'Stop'
@@ -11,6 +12,7 @@ $ErrorActionPreference = 'Stop'
 $MarkerStart = '<!-- agent-review-workflow:begin -->'
 $MarkerEnd = '<!-- agent-review-workflow:end -->'
 $RawBaseUrl = 'https://raw.githubusercontent.com/jokerD888/agent-review-workflow/main'
+$ForceRemote = $Update
 if (-not $UserHomePath) {
     $UserHomePath = [Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile)
 }
@@ -19,7 +21,7 @@ function Get-WorkflowFile {
     param([Parameter(Mandatory = $true)][string]$RelativePath)
 
     $scriptDirectory = Split-Path -Parent $PSCommandPath
-    if ($scriptDirectory) {
+    if ($scriptDirectory -and -not $ForceRemote) {
         $localPath = Join-Path $scriptDirectory $RelativePath
         if (Test-Path -LiteralPath $localPath) {
             return Get-Content -Raw -LiteralPath $localPath
@@ -28,6 +30,34 @@ function Get-WorkflowFile {
 
     $uri = "$RawBaseUrl/$RelativePath"
     return (Invoke-WebRequest -UseBasicParsing -Uri $uri).Content
+}
+
+function Install-CommandLineTool {
+    $runtimeRoot = Join-Path $env:LOCALAPPDATA 'AgentReviewWorkflow'
+    $runtimeFiles = @(
+        'install.ps1', 'arw.ps1', 'rules/global.md', 'templates/AGENTS.md',
+        'templates/CLAUDE.md', 'templates/opencode-reviewer.md',
+        'scripts/start-task.ps1', 'scripts/review.ps1'
+    )
+
+    foreach ($runtimeFile in $runtimeFiles) {
+        $destination = Join-Path $runtimeRoot $runtimeFile
+        $destinationDirectory = Split-Path -Parent $destination
+        New-Item -ItemType Directory -Path $destinationDirectory -Force | Out-Null
+        Set-Content -LiteralPath $destination -Value (Get-WorkflowFile $runtimeFile) -Encoding utf8
+    }
+
+    $binDirectory = Join-Path $runtimeRoot 'bin'
+    New-Item -ItemType Directory -Path $binDirectory -Force | Out-Null
+    $wrapper = "@echo off`r`npwsh.exe -NoProfile -ExecutionPolicy Bypass -File `"%~dp0..\arw.ps1`" %*`r`n"
+    Set-Content -LiteralPath (Join-Path $binDirectory 'arw.cmd') -Value $wrapper -Encoding ascii
+
+    $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+    if (($userPath -split ';' | Where-Object { $_ -eq $binDirectory }).Count -eq 0) {
+        [Environment]::SetEnvironmentVariable('Path', "$userPath;$binDirectory", 'User')
+        Write-Host "Added $binDirectory to the user PATH. Open a new terminal to use 'arw'."
+    }
+    Write-Host "Installed command-line tool in $runtimeRoot"
 }
 
 function Set-ManagedBlock {
@@ -94,6 +124,7 @@ $codexHomePath = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $User
 Set-ManagedBlock -Path (Join-Path $codexHomePath 'AGENTS.md') -Content $globalRules
 Set-ManagedBlock -Path (Join-Path $UserHomePath '.claude/CLAUDE.md') -Content $globalRules
 Set-ManagedBlock -Path (Join-Path $UserHomePath '.config/opencode/AGENTS.md') -Content $globalRules
+Install-CommandLineTool
 
 if ($ProjectPath) {
     Add-ProjectFiles -Path $ProjectPath

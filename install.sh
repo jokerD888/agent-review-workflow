@@ -8,6 +8,7 @@ PROJECT_PATH=''
 GLOBAL_ONLY=0
 INSTALL_OPENCODE_REVIEWER=0
 USER_HOME_PATH="${HOME:?HOME must be set}"
+UPDATE=0
 
 usage() {
   cat <<'EOF'
@@ -27,6 +28,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     --with-opencode-reviewer)
       INSTALL_OPENCODE_REVIEWER=1
+      shift
+      ;;
+    --update)
+      UPDATE=1
       shift
       ;;
     --help|-h)
@@ -53,7 +58,7 @@ trap 'rm -rf "$TEMP_DIRECTORY"' EXIT INT TERM
 get_workflow_file() {
   relative_path=$1
   local_path="$SCRIPT_DIRECTORY/$relative_path"
-  if [ -n "$SCRIPT_DIRECTORY" ] && [ -f "$local_path" ]; then
+  if [ "$UPDATE" -eq 0 ] && [ -n "$SCRIPT_DIRECTORY" ] && [ -f "$local_path" ]; then
     printf '%s\n' "$local_path"
     return
   fi
@@ -61,6 +66,38 @@ get_workflow_file() {
   downloaded_path="$TEMP_DIRECTORY/$(basename "$relative_path")"
   curl -fsSL "$RAW_BASE_URL/$relative_path" -o "$downloaded_path"
   printf '%s\n' "$downloaded_path"
+}
+
+install_command_line_tool() {
+  runtime_root="$USER_HOME_PATH/.local/share/agent-review-workflow"
+  runtime_files='install.sh arw.sh rules/global.md templates/AGENTS.md templates/CLAUDE.md templates/opencode-reviewer.md scripts/start-task.sh scripts/review.sh'
+  for runtime_file in $runtime_files; do
+    destination="$runtime_root/$runtime_file"
+    mkdir -p "$(dirname -- "$destination")"
+    source_file=$(get_workflow_file "$runtime_file")
+    cp "$source_file" "$destination"
+  done
+  chmod +x "$runtime_root/install.sh" "$runtime_root/arw.sh" "$runtime_root/scripts/start-task.sh" "$runtime_root/scripts/review.sh"
+
+  bin_directory="$USER_HOME_PATH/.local/bin"
+  mkdir -p "$bin_directory"
+  cat > "$bin_directory/arw" <<EOF
+#!/usr/bin/env sh
+exec "$runtime_root/arw.sh" "\$@"
+EOF
+  chmod +x "$bin_directory/arw"
+
+  profile_path="$USER_HOME_PATH/.profile"
+  profile_start='# agent-review-workflow:path:begin'
+  profile_end='# agent-review-workflow:path:end'
+  if ! grep -Fq "$profile_start" "$profile_path" 2>/dev/null; then
+    {
+      printf '\n%s\n' "$profile_start"
+      printf 'export PATH="$HOME/.local/bin:$PATH"\n'
+      printf '%s\n' "$profile_end"
+    } >> "$profile_path"
+  fi
+  printf "Installed command-line tool in %s. Open a new shell to use 'arw'.\n" "$runtime_root"
 }
 
 set_managed_block() {
@@ -94,6 +131,7 @@ codex_home_path=${CODEX_HOME:-"$USER_HOME_PATH/.codex"}
 set_managed_block "$codex_home_path/AGENTS.md" "$global_rules"
 set_managed_block "$USER_HOME_PATH/.claude/CLAUDE.md" "$global_rules"
 set_managed_block "$USER_HOME_PATH/.config/opencode/AGENTS.md" "$global_rules"
+install_command_line_tool
 
 if [ -n "$PROJECT_PATH" ]; then
   if [ ! -d "$PROJECT_PATH" ]; then
