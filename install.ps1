@@ -43,7 +43,7 @@ function Set-ManagedBlock {
 
     $block = "$MarkerStart`r`n$($Content.Trim())`r`n$MarkerEnd"
     $existing = if (Test-Path -LiteralPath $Path) {
-        Get-Content -Raw -LiteralPath $Path
+        [string](Get-Content -Raw -LiteralPath $Path)
     } else {
         ''
     }
