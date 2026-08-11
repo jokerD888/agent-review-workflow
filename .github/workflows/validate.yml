@@ -1,0 +1,78 @@
+name: Validate
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate PowerShell installer and helpers
+        shell: pwsh
+        run: |
+          $testRoot = Join-Path $env:RUNNER_TEMP 'agent-review-workflow-test'
+          $homePath = Join-Path $testRoot 'home'
+          $projectPath = Join-Path $testRoot 'project'
+          New-Item -ItemType Directory -Path $homePath, $projectPath -Force | Out-Null
+          git init --initial-branch main $projectPath
+          git -C $projectPath config user.email 'test@example.invalid'
+          git -C $projectPath config user.name 'Workflow Test'
+          Set-Content -LiteralPath (Join-Path $projectPath 'app.txt') -Value 'baseline'
+          git -C $projectPath add app.txt
+          git -C $projectPath commit -m 'chore: baseline'
+          $env:CODEX_HOME = Join-Path $testRoot 'codex'
+          ./install.ps1 -UserHomePath $homePath -ProjectPath $projectPath -InstallOpenCodeReviewer
+          git -C $projectPath add AGENTS.md CLAUDE.md .opencode
+          git -C $projectPath commit -m 'chore: add workflow rules'
+          Push-Location $projectPath
+          try {
+            & $env:GITHUB_WORKSPACE/scripts/start-task.ps1 -Name 'Fix Login Redirect'
+            & $env:GITHUB_WORKSPACE/scripts/review.ps1 -BaseBranch main
+          } finally {
+            Pop-Location
+          }
+          $requiredFiles = @(
+            (Join-Path $env:CODEX_HOME 'AGENTS.md'),
+            (Join-Path $homePath '.claude/CLAUDE.md'),
+            (Join-Path $homePath '.config/opencode/AGENTS.md'),
+            (Join-Path $projectPath '.opencode/agents/review.md')
+          )
+          foreach ($requiredFile in $requiredFiles) {
+            if (-not (Test-Path -LiteralPath $requiredFile)) {
+              throw "Missing expected file: $requiredFile"
+            }
+          }
+
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate shell installer and helpers
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x install.sh scripts/*.sh
+          bash -n install.sh scripts/*.sh
+          test_root="$(mktemp -d)"
+          project_path="$test_root/project"
+          mkdir -p "$project_path"
+          git init --initial-branch main "$project_path"
+          git -C "$project_path" config user.email 'test@example.invalid'
+          git -C "$project_path" config user.name 'Workflow Test'
+          printf 'baseline\n' > "$project_path/app.txt"
+          git -C "$project_path" add app.txt
+          git -C "$project_path" commit -m 'chore: baseline'
+          HOME="$test_root/home" CODEX_HOME="$test_root/codex" ./install.sh --project "$project_path" --with-opencode-reviewer
+          git -C "$project_path" add AGENTS.md CLAUDE.md .opencode
+          git -C "$project_path" commit -m 'chore: add workflow rules'
+          (
+            cd "$project_path"
+            "$GITHUB_WORKSPACE/scripts/start-task.sh" 'Fix Login Redirect'
+            "$GITHUB_WORKSPACE/scripts/review.sh" main
+          )
+          test -f "$test_root/codex/AGENTS.md"
+          test -f "$test_root/home/.claude/CLAUDE.md"
+          test -f "$test_root/home/.config/opencode/AGENTS.md"
+          test -f "$project_path/.opencode/agents/review.md"
