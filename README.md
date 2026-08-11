@@ -45,14 +45,22 @@ my-project/
 Review and commit the generated project files before using `start-task`; the
 helper deliberately refuses to create a task branch from a dirty working tree.
 
-For a public fork, a one-line install is also supported:
+## Install directly from GitHub
+
+For a quick user-level installation on Windows, run:
 
 ```powershell
-irm https://raw.githubusercontent.com/<owner>/agent-review-workflow/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/jokerD888/agent-review-workflow/main/install.ps1 | iex
 ```
 
-For a private repository, clone it first and run the local installer so GitHub
-authentication is handled normally.
+For macOS or Linux, run:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jokerD888/agent-review-workflow/main/install.sh | sh
+```
+
+To configure a specific project, clone the repository and pass its local path
+to the installer as shown above.
 
 ## Install on macOS or Linux
 
