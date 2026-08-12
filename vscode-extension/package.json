@@ -2,7 +2,7 @@
   "name": "agent-review-workflow",
   "displayName": "Agent Review Workflow",
   "description": "Review AI coding tasks against their recorded ARW base.",
-  "version": "0.2.0",
+  "version": "2.0.6",
   "publisher": "jokerd888",
   "license": "MIT",
   "repository": { "type": "git", "url": "https://github.com/jokerD888/agent-review-workflow.git" },

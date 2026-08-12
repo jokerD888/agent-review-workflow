@@ -15,9 +15,10 @@ import (
 const ProtocolVersion = "2025-03-26"
 
 type Server struct {
-	In  io.Reader
-	Out io.Writer
-	Err io.Writer
+	In      io.Reader
+	Out     io.Writer
+	Err     io.Writer
+	Version string
 }
 type request struct {
 	JSONRPC string          `json:"jsonrpc"`
@@ -77,7 +78,11 @@ func (s Server) Run() error {
 func (s Server) handle(req request) (any, error) {
 	switch req.Method {
 	case "initialize":
-		return map[string]any{"protocolVersion": ProtocolVersion, "capabilities": map[string]any{"tools": map[string]any{}}, "serverInfo": map[string]string{"name": "arw-mcp", "version": "0.2.0-dev"}, "instructions": "Use only the ARW task tools. High-risk Git operations are intentionally unavailable."}, nil
+		version := s.Version
+		if version == "" {
+			version = "0.2.0-dev"
+		}
+		return map[string]any{"protocolVersion": ProtocolVersion, "capabilities": map[string]any{"tools": map[string]any{}}, "serverInfo": map[string]string{"name": "arw-mcp", "version": version}, "instructions": "Use only the ARW task tools. High-risk Git operations are intentionally unavailable."}, nil
 	case "ping":
 		return map[string]any{}, nil
 	case "tools/list":

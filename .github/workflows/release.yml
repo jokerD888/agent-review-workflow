@@ -23,9 +23,9 @@ jobs:
           GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w -X main.version=${{ github.ref_name }}" -o dist/arw_windows_amd64.exe ./cmd/arw
           GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w -X main.version=${{ github.ref_name }}" -o dist/arw_linux_amd64 ./cmd/arw
           GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w -X main.version=${{ github.ref_name }}" -o dist/arw_linux_arm64 ./cmd/arw
-          GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o dist/arw-mcp_windows_amd64.exe ./cmd/arw-mcp
-          GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o dist/arw-mcp_linux_amd64 ./cmd/arw-mcp
-          GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o dist/arw-mcp_linux_arm64 ./cmd/arw-mcp
+          GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w -X main.version=${{ github.ref_name }}" -o dist/arw-mcp_windows_amd64.exe ./cmd/arw-mcp
+          GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w -X main.version=${{ github.ref_name }}" -o dist/arw-mcp_linux_amd64 ./cmd/arw-mcp
+          GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w -X main.version=${{ github.ref_name }}" -o dist/arw-mcp_linux_arm64 ./cmd/arw-mcp
       - name: Build VS Code extension
         working-directory: vscode-extension
         run: npm ci && npm run package && cp *.vsix ../dist/agent-review-workflow-${{ github.ref_name }}.vsix
