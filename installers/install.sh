@@ -33,7 +33,17 @@ os.makedirs(os.path.dirname(path), exist_ok=True)
 try:
     with open(path, encoding="utf-8") as f: config = json.load(f)
 except FileNotFoundError: config = {}
-config.setdefault("mcp", {}).setdefault("servers", {})["arw"] = {"type": "local", "command": [os.environ["ARW_MCP_COMMAND"]], "timeout": {"startup": 30000}}
+version = os.popen("opencode --version").read().strip()
+server = {"type": "local", "command": [os.environ["ARW_MCP_COMMAND"]]}
+mcp = config.setdefault("mcp", {})
+if int(version.split(".", 1)[0]) >= 2:
+    server["timeout"] = {"startup": 30000}
+    mcp.setdefault("servers", {})["arw"] = server
+else:
+    mcp.pop("servers", None)
+    server["enabled"] = True
+    server["timeout"] = 30000
+    mcp["arw"] = server
 with open(path, "w", encoding="utf-8") as f: json.dump(config, f, indent=2); f.write("\n")
 PY
   else

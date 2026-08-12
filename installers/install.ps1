@@ -34,7 +34,7 @@ function Set-AgentMcpConfig {
     $codexConfig = Join-Path $env:USERPROFILE '.codex\config.toml'
     if (Test-Path -LiteralPath $codexConfig) {
         $begin = '# agent-review-workflow:mcp:begin'; $end = '# agent-review-workflow:mcp:end'
-        $block = "$begin`r`n[mcp_servers.arw]`r`ncommand = '$($mcpPath.Replace('\', '\\'))'`r`nstartup_timeout_sec = 30`r`n$end"
+        $block = "$begin`r`n[mcp_servers.arw]`r`ncommand = '$mcpPath'`r`nstartup_timeout_sec = 30`r`n$end"
         $existing = Get-Content -Raw -LiteralPath $codexConfig
         $pattern = '(?s)' + [regex]::Escape($begin) + '.*?' + [regex]::Escape($end)
         $updated = if ([regex]::IsMatch($existing, $pattern)) { [regex]::Replace($existing, $pattern, $block) } else { "$($existing.TrimEnd())`r`n`r`n$block`r`n" }
@@ -44,8 +44,19 @@ function Set-AgentMcpConfig {
     if (Get-Command opencode -ErrorAction SilentlyContinue) {
         $configPath = Join-Path $env:USERPROFILE '.config\opencode\opencode.json'
         $config = if (Test-Path -LiteralPath $configPath) { Get-Content -Raw -LiteralPath $configPath | ConvertFrom-Json -AsHashtable } else { @{} }
-        if (-not $config.ContainsKey('mcp')) { $config.mcp = @{} }; if (-not $config.mcp.ContainsKey('servers')) { $config.mcp.servers = @{} }
-        $config.mcp.servers.arw = @{ type = 'local'; command = @($mcpPath); timeout = @{ startup = 30000 } }
+        if (-not $config.ContainsKey('mcp')) { $config.mcp = @{} }
+        $majorVersion = [int](((& opencode --version) -split '\.')[0])
+        $server = @{ type = 'local'; command = @($mcpPath) }
+        if ($majorVersion -ge 2) {
+            if (-not $config.mcp.ContainsKey('servers')) { $config.mcp.servers = @{} }
+            $server.timeout = @{ startup = 30000 }
+            $config.mcp.servers.arw = $server
+        } else {
+            if ($config.mcp.ContainsKey('servers')) { $config.mcp.Remove('servers') }
+            $server.enabled = $true
+            $server.timeout = 30000
+            $config.mcp.arw = $server
+        }
         New-Item -ItemType Directory -Path (Split-Path -Parent $configPath) -Force | Out-Null
         $config | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $configPath -Encoding utf8
     }
