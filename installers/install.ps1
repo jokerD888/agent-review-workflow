@@ -2,6 +2,7 @@
 param(
     [string]$Version = 'latest',
     [switch]$InstallExtension,
+    [switch]$ConfigureAgents,
     [switch]$Force
 )
 
@@ -26,6 +27,28 @@ function Download-Checked([object]$Release, [string]$Name, [string]$Destination,
     Invoke-WebRequest -UseBasicParsing -Uri $asset.browser_download_url -OutFile $Destination
     $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $Destination).Hash.ToLowerInvariant()
     if (-not $Checksums.ContainsKey($Name) -or $Checksums[$Name] -ne $actual) { Remove-Item -LiteralPath $Destination -Force; throw "SHA-256 verification failed for $Name." }
+}
+
+function Set-AgentMcpConfig {
+    $mcpPath = Join-Path $BinDirectory 'arw-mcp.exe'
+    $codexConfig = Join-Path $env:USERPROFILE '.codex\config.toml'
+    if (Test-Path -LiteralPath $codexConfig) {
+        $begin = '# agent-review-workflow:mcp:begin'; $end = '# agent-review-workflow:mcp:end'
+        $block = "$begin`r`n[mcp_servers.arw]`r`ncommand = '$($mcpPath.Replace('\', '\\'))'`r`nstartup_timeout_sec = 30`r`n$end"
+        $existing = Get-Content -Raw -LiteralPath $codexConfig
+        $pattern = '(?s)' + [regex]::Escape($begin) + '.*?' + [regex]::Escape($end)
+        $updated = if ([regex]::IsMatch($existing, $pattern)) { [regex]::Replace($existing, $pattern, $block) } else { "$($existing.TrimEnd())`r`n`r`n$block`r`n" }
+        Set-Content -LiteralPath $codexConfig -Value $updated -Encoding utf8
+    }
+    if (Get-Command claude -ErrorAction SilentlyContinue) { & claude mcp add --scope user arw -- $mcpPath | Out-Host }
+    if (Get-Command opencode -ErrorAction SilentlyContinue) {
+        $configPath = Join-Path $env:USERPROFILE '.config\opencode\opencode.json'
+        $config = if (Test-Path -LiteralPath $configPath) { Get-Content -Raw -LiteralPath $configPath | ConvertFrom-Json -AsHashtable } else { @{} }
+        if (-not $config.ContainsKey('mcp')) { $config.mcp = @{} }; if (-not $config.mcp.ContainsKey('servers')) { $config.mcp.servers = @{} }
+        $config.mcp.servers.arw = @{ type = 'local'; command = @($mcpPath); timeout = @{ startup = 30000 } }
+        New-Item -ItemType Directory -Path (Split-Path -Parent $configPath) -Force | Out-Null
+        $config | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $configPath -Encoding utf8
+    }
 }
 
 $release = Get-Release
@@ -53,5 +76,6 @@ try {
         Download-Checked $release $vsix.name $vsixPath $checksums
         & code --install-extension $vsixPath --force
     }
+    if ($ConfigureAgents) { Set-AgentMcpConfig }
     Write-Host "Installed ARW $($release.tag_name) in $RuntimeRoot. Run 'arw doctor' from a repository."
 } finally { Remove-Item -LiteralPath $temporary -Recurse -Force -ErrorAction SilentlyContinue }

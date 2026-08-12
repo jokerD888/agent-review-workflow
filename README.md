@@ -89,17 +89,22 @@ can install the VSIX:
 
 ```powershell
 irm https://raw.githubusercontent.com/jokerD888/agent-review-workflow/main/installers/install.ps1 -OutFile install-arw.ps1
-.\install-arw.ps1 -InstallExtension
+.\install-arw.ps1 -InstallExtension -ConfigureAgents
 ```
 
 ```bash
 curl -fsSLO https://raw.githubusercontent.com/jokerD888/agent-review-workflow/main/installers/install.sh
-sh install.sh --with-extension
+sh install.sh --with-extension --configure-agents
 ```
 
 Use `--version vX.Y.Z` to pin a release; use `--force` only to replace an
 existing ARW installation. `arw update` is intentionally not available until a
 release has been verified; rerun the versioned installer instead.
+
+`-ConfigureAgents` on Windows and `--configure-agents` on Linux add the local,
+typed `arw-mcp` service to Codex, Claude Code, and OpenCode. Restart those
+applications after installing. Linux OpenCode setup uses Python 3's standard
+JSON library to preserve existing user configuration.
 
 ## v1 installation (compatibility only)
 
