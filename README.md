@@ -25,6 +25,15 @@ go build -o .\bin\arw.exe .\cmd\arw
 not in product commits. `arw task start` makes a branch and a separate
 worktree; it neither changes `main` nor pushes anything.
 
+### When ARW is optional
+
+ARW is for durable, reviewable delivery work—not every chat. Questions,
+investigation, throwaway experiments, and disposable one-off tools stay outside
+ARW by default. Say “这次不用 ARW”, “不建任务”, or “临时处理” to opt out for the
+current conversation. If the intent is unclear, a configured agent should ask
+once whether this is temporary work or a reviewable ARW task. Say “开始 ARW” or
+“把这个纳入 ARW” to opt back in.
+
 For a review, run `arw review prepare <task-id>`. It returns the exact recorded
 base and task HEAD, commits, changed files, dirty-worktree status, dependency
 state, test evidence, and risks. A child task is conditionally reviewable until

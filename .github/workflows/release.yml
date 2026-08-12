@@ -29,6 +29,8 @@ jobs:
       - name: Build VS Code extension
         working-directory: vscode-extension
         run: npm ci && npm run package && cp *.vsix ../dist/agent-review-workflow-${{ github.ref_name }}.vsix
+      - name: Include managed agent rules
+        run: cp rules/global.md dist/arw-global-rules.md
       - name: Create checksums
         working-directory: dist
         run: sha256sum * > checksums.txt

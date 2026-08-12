@@ -46,8 +46,20 @@
 
 ## ARW v2 task workflow
 
-- When `arw` and its typed `arw-mcp` tools are available in a Git repository,
-  read `workflow_context` before starting AI work on a named task.
+- ARW is opt-in by intent, not mandatory for every repository or conversation.
+  Do not create an ARW task merely because a Git repository is open or the user
+  named a subject.
+- Treat questions, explanation, investigation, throwaway experiments, and
+  clearly disposable one-off tools as non-ARW work by default.
+- Treat a clear delivery/review intent (for example “开始修复…”, “新增功能…”,
+  “这个要审查”) as an ARW task intent. When the scope is genuinely unclear,
+  ask one short question before creating a task: “这是临时处理，还是要作为可审查
+  任务纳入 ARW？” Do not repeatedly ask after the user has answered.
+- “这次不用 ARW”, “不建任务”, “临时处理”, or equivalent wording disables ARW
+  for the current conversation until the user explicitly asks to use/start ARW.
+  This only skips ARW bookkeeping; all Git safety rules still apply.
+- When `arw` and its typed `arw-mcp` tools are available and the user has chosen
+  ARW for a named task, read `workflow_context` before starting AI work.
 - Map a clear user intent such as “开始修复登录跳转” only to
   `workflow_start_task`; map review requests to `workflow_prepare_review`.
   Never pass arbitrary shell text to ARW.

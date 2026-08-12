@@ -26,13 +26,29 @@ function Download-Checked([string]$ReleaseBase, [string]$Name, [string]$Destinat
     if (-not $Checksums.ContainsKey($Name) -or $Checksums[$Name] -ne $actual) { Remove-Item -LiteralPath $Destination -Force; throw "SHA-256 verification failed for $Name." }
 }
 
-function Set-AgentMcpConfig {
+function Set-ManagedRules([string]$Path, [string]$RulesPath) {
+    $begin = '<!-- agent-review-workflow:begin -->'; $end = '<!-- agent-review-workflow:end -->'
+    $directory = Split-Path -Parent $Path
+    New-Item -ItemType Directory -Path $directory -Force | Out-Null
+    $rules = (Get-Content -Raw -LiteralPath $RulesPath).Trim()
+    $block = "$begin`r`n$rules`r`n$end"
+    $existing = if (Test-Path -LiteralPath $Path) { Get-Content -Raw -LiteralPath $Path } else { '' }
+    $pattern = '(?s)' + [regex]::Escape($begin) + '.*?' + [regex]::Escape($end)
+    $updated = if ([regex]::IsMatch($existing, $pattern)) { [regex]::Replace($existing, $pattern, $block) } elseif ([string]::IsNullOrWhiteSpace($existing)) { "$block`r`n" } else { "$($existing.TrimEnd())`r`n`r`n$block`r`n" }
+    Set-Content -LiteralPath $Path -Value $updated -Encoding utf8
+}
+
+function Set-AgentMcpConfig([string]$RulesPath) {
     $mcpPath = Join-Path $BinDirectory 'arw-mcp.exe'
     $codexConfig = Join-Path $env:USERPROFILE '.codex\config.toml'
-    if (Test-Path -LiteralPath $codexConfig) {
+    Set-ManagedRules (Join-Path $env:USERPROFILE '.codex\AGENTS.md') $RulesPath
+    Set-ManagedRules (Join-Path $env:USERPROFILE '.claude\CLAUDE.md') $RulesPath
+    Set-ManagedRules (Join-Path $env:USERPROFILE '.config\opencode\AGENTS.md') $RulesPath
+    {
+        New-Item -ItemType Directory -Path (Split-Path -Parent $codexConfig) -Force | Out-Null
         $begin = '# agent-review-workflow:mcp:begin'; $end = '# agent-review-workflow:mcp:end'
         $block = "$begin`r`n[mcp_servers.arw]`r`ncommand = '$mcpPath'`r`nstartup_timeout_sec = 30`r`n$end"
-        $existing = Get-Content -Raw -LiteralPath $codexConfig
+        $existing = if (Test-Path -LiteralPath $codexConfig) { Get-Content -Raw -LiteralPath $codexConfig } else { '' }
         $pattern = '(?s)' + [regex]::Escape($begin) + '.*?' + [regex]::Escape($end)
         $updated = if ([regex]::IsMatch($existing, $pattern)) { [regex]::Replace($existing, $pattern, $block) } else { "$($existing.TrimEnd())`r`n`r`n$block`r`n" }
         Set-Content -LiteralPath $codexConfig -Value $updated -Encoding utf8
@@ -67,6 +83,8 @@ try {
     Invoke-WebRequest -UseBasicParsing -Uri "$releaseBase/checksums.txt" -OutFile $checksumsPath
     $checksums = @{}
     Get-Content -LiteralPath $checksumsPath | ForEach-Object { if ($_ -match '^([a-fA-F0-9]{64})\s+\*?(.+)$') { $checksums[$matches[2]] = $matches[1].ToLowerInvariant() } }
+    $rulesPath = Join-Path $temporary 'arw-global-rules.md'
+    Download-Checked $releaseBase 'arw-global-rules.md' $rulesPath $checksums
     New-Item -ItemType Directory -Path $BinDirectory -Force | Out-Null
     foreach ($name in 'arw_windows_amd64.exe', 'arw-mcp_windows_amd64.exe') {
         $target = Join-Path $BinDirectory $name
@@ -83,6 +101,6 @@ try {
         Download-Checked $releaseBase $vsix $vsixPath $checksums
         & code --install-extension $vsixPath --force
     }
-    if ($ConfigureAgents) { Set-AgentMcpConfig }
+    if ($ConfigureAgents) { Set-AgentMcpConfig $rulesPath }
     Write-Host "Installed ARW $tag in $RuntimeRoot. Run 'arw doctor' from a repository."
 } finally { Remove-Item -LiteralPath $temporary -Recurse -Force -ErrorAction SilentlyContinue }

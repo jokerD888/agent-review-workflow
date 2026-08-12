@@ -24,10 +24,25 @@ fi
 RELEASE_BASE="https://github.com/$REPOSITORY/releases/download/$TAG"
 curl -fsSL "$RELEASE_BASE/checksums.txt" -o "$TMP/checksums.txt"
 download() { name=$1; curl -fsSL "$RELEASE_BASE/$name" -o "$TMP/$name"; (cd "$TMP" && awk -v name="$name" '{ sub(/\r$/, "", $2); if (length($1) == 64 && $2 == name) print }' checksums.txt | sha256sum -c -); }
+set_managed_rules() {
+  target=$1
+  mkdir -p "$(dirname -- "$target")"
+  cleaned="$TMP/cleaned-$(basename -- "$target")"
+  if [ -f "$target" ]; then
+    awk -v start='<!-- agent-review-workflow:begin -->' -v end='<!-- agent-review-workflow:end -->' '$0 == start { inside=1; next } $0 == end { inside=0; next } !inside { print }' "$target" > "$cleaned"
+  else
+    : > "$cleaned"
+  fi
+  { cat "$cleaned"; printf '\n<!-- agent-review-workflow:begin -->\n'; cat "$TMP/arw-global-rules.md"; printf '\n<!-- agent-review-workflow:end -->\n'; } > "$target"
+}
 mkdir -p "$BIN"
 for name in "arw_linux_$ARCH" "arw-mcp_linux_$ARCH"; do [ "$FORCE" = 1 ] || [ ! -e "$BIN/${name%%_linux_*}" ] || { echo "Use --force to replace existing installation." >&2; exit 1; }; download "$name"; install -m 0755 "$TMP/$name" "$BIN/${name%%_linux_*}"; done
 if [ "$INSTALL_EXTENSION" = 1 ]; then vsix="agent-review-workflow-$TAG.vsix"; download "$vsix"; code --install-extension "$TMP/$vsix" --force; fi
 if [ "$CONFIGURE_AGENTS" = 1 ]; then
+  download arw-global-rules.md
+  set_managed_rules "${CODEX_HOME:-"$HOME/.codex"}/AGENTS.md"
+  set_managed_rules "$HOME/.claude/CLAUDE.md"
+  set_managed_rules "${XDG_CONFIG_HOME:-"$HOME/.config"}/opencode/AGENTS.md"
   command -v codex >/dev/null 2>&1 && codex mcp add arw -- "$BIN/arw-mcp"
   command -v claude >/dev/null 2>&1 && claude mcp add --scope user arw -- "$BIN/arw-mcp"
   if command -v python3 >/dev/null 2>&1; then
