@@ -14,8 +14,10 @@ $BinDirectory = Join-Path $RuntimeRoot 'bin'
 function Resolve-ReleaseTag {
     if ($Version -ne 'latest') { return $Version }
     $response = Invoke-WebRequest -UseBasicParsing -MaximumRedirection 5 -Uri "https://github.com/$Repository/releases/latest"
-    if ($response.BaseResponse.ResponseUri.AbsolutePath -notmatch '/releases/tag/([^/]+)$') { throw 'Could not resolve the latest ARW release tag.' }
-    return $matches[1]
+    if ($response.BaseResponse.RequestMessage.RequestUri.AbsolutePath -match '/releases/tag/([^/]+)$') { return $matches[1] }
+    $tagMatch = [regex]::Match($response.Content, '/releases/tag/(v[^"?#< /]+)')
+    if (-not $tagMatch.Success) { throw 'Could not resolve the latest ARW release tag.' }
+    return $tagMatch.Groups[1].Value
 }
 
 function Download-Checked([string]$ReleaseBase, [string]$Name, [string]$Destination, [hashtable]$Checksums) {

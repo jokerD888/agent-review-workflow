@@ -14,7 +14,9 @@ BIN="$ROOT/bin"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT INT TERM
 if [ "$VERSION" = latest ]; then
-  TAG=$(curl -fsSL -o /dev/null -w '%{url_effective}' "https://github.com/$REPOSITORY/releases/latest" | sed -n 's#.*/releases/tag/##p')
+  LATEST_URL=$(curl -fsSL -o /dev/null -w '%{url_effective}' "https://github.com/$REPOSITORY/releases/latest")
+  TAG=$(printf '%s' "$LATEST_URL" | sed -n 's#.*/releases/tag/##p')
+  if [ -z "$TAG" ]; then TAG=$(curl -fsSL "https://github.com/$REPOSITORY/releases/latest" | grep -o '/releases/tag/v[^"?< ]*' | head -n1 | sed 's#.*/##'); fi
 else
   TAG=$VERSION
 fi
