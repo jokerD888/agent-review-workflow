@@ -23,7 +23,7 @@ fi
 [ -n "$TAG" ] || { echo 'Could not resolve the latest ARW release tag.' >&2; exit 1; }
 RELEASE_BASE="https://github.com/$REPOSITORY/releases/download/$TAG"
 curl -fsSL "$RELEASE_BASE/checksums.txt" -o "$TMP/checksums.txt"
-download() { name=$1; curl -fsSL "$RELEASE_BASE/$name" -o "$TMP/$name"; grep -E "^[[:xdigit:]]{64}[[:space:]]+\*?$name$" "$TMP/checksums.txt" | sha256sum -c -; }
+download() { name=$1; curl -fsSL "$RELEASE_BASE/$name" -o "$TMP/$name"; (cd "$TMP" && awk -v name="$name" '{ sub(/\r$/, "", $2); if (length($1) == 64 && $2 == name) print }' checksums.txt | sha256sum -c -); }
 mkdir -p "$BIN"
 for name in "arw_linux_$ARCH" "arw-mcp_linux_$ARCH"; do [ "$FORCE" = 1 ] || [ ! -e "$BIN/${name%%_linux_*}" ] || { echo "Use --force to replace existing installation." >&2; exit 1; }; download "$name"; install -m 0755 "$TMP/$name" "$BIN/${name%%_linux_*}"; done
 if [ "$INSTALL_EXTENSION" = 1 ]; then vsix="agent-review-workflow-$TAG.vsix"; download "$vsix"; code --install-extension "$TMP/$vsix" --force; fi
