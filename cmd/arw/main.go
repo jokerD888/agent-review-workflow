@@ -13,7 +13,7 @@ import (
 	"github.com/jokerD888/agent-review-workflow/internal/task"
 )
 
-const version = "0.2.0-dev"
+var version = "0.2.0-dev"
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
