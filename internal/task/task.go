@@ -93,7 +93,23 @@ func (t Task) Validate() error {
 	if !validReview(t.Review.Status) {
 		return fmt.Errorf("invalid review status %q", t.Review.Status)
 	}
+	for index, evidence := range t.Tests {
+		if err := evidence.Validate(); err != nil {
+			return fmt.Errorf("test evidence %d: %w", index, err)
+		}
+	}
 	return nil
+}
+
+func (e TestEvidence) Validate() error {
+	if strings.TrimSpace(e.Command) == "" {
+		return fmt.Errorf("test command is required")
+	}
+	switch e.Result {
+	case "passed", "failed", "skipped", "unknown":
+		return nil
+	}
+	return fmt.Errorf("invalid test result %q", e.Result)
 }
 
 func ValidID(id string) bool {

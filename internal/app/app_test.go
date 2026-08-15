@@ -98,6 +98,96 @@ func TestApproveRequiresKnownCleanWorktree(t *testing.T) {
 	}
 }
 
+func TestLifecycleAndTestEvidence(t *testing.T) {
+	root := t.TempDir()
+	repo := filepath.Join(root, "repo")
+	if err := os.Mkdir(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "init", "--initial-branch=main")
+	runGit(t, repo, "config", "user.name", "ARW Test")
+	runGit(t, repo, "config", "user.email", "arw-test@example.invalid")
+	runGit(t, repo, "commit", "--allow-empty", "-m", "initial")
+	svc, err := New(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, err := svc.Start(StartOptions{Title: "Feature A", ID: "feature-a", Kind: "feature", WorktreePath: filepath.Join(root, "feature-a")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, err := svc.RecordTest(started.Task.ID, task.TestEvidence{Command: "go test ./...", Result: "passed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entry.Tests) != 1 || entry.Tests[0].RecordedAt == "" {
+		t.Fatalf("recorded test evidence = %#v", entry.Tests)
+	}
+	entry, err = svc.MarkReady(started.Task.ID)
+	if err != nil || entry.Lifecycle != task.ReadyForReview {
+		t.Fatalf("MarkReady() = %#v, %v", entry, err)
+	}
+	if _, err := svc.MarkMerged(started.Task.ID); err == nil {
+		t.Fatal("MarkMerged() succeeded before approval")
+	}
+	if _, _, err := svc.Approve(started.Task.ID); err != nil {
+		t.Fatal(err)
+	}
+	entry, err = svc.MarkMerged(started.Task.ID)
+	if err != nil || entry.Lifecycle != task.Merged {
+		t.Fatalf("MarkMerged() = %#v, %v", entry, err)
+	}
+
+	abandoned, err := svc.Start(StartOptions{Title: "Feature B", ID: "feature-b", Kind: "feature", WorktreePath: filepath.Join(root, "feature-b")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, err = svc.Abandon(abandoned.Task.ID)
+	if err != nil || entry.Lifecycle != task.Abandoned {
+		t.Fatalf("Abandon() = %#v, %v", entry, err)
+	}
+	if _, err := svc.RecordTest(abandoned.Task.ID, task.TestEvidence{Command: "go test ./...", Result: "passed"}); err == nil {
+		t.Fatal("RecordTest() succeeded for an abandoned task")
+	}
+}
+
+func TestChildReviewRequiresReapprovalWhenParentChanges(t *testing.T) {
+	root := t.TempDir()
+	repo := filepath.Join(root, "repo")
+	if err := os.Mkdir(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "init", "--initial-branch=main")
+	runGit(t, repo, "config", "user.name", "ARW Test")
+	runGit(t, repo, "config", "user.email", "arw-test@example.invalid")
+	runGit(t, repo, "commit", "--allow-empty", "-m", "initial")
+	svc, err := New(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent, err := svc.Start(StartOptions{Title: "Parent", ID: "parent", Kind: "feature", WorktreePath: filepath.Join(root, "parent")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, parent.Worktree, "commit", "--allow-empty", "-m", "parent work")
+	child, err := svc.Start(StartOptions{Title: "Child", ID: "child", Kind: "feature", ParentTask: "parent", WorktreePath: filepath.Join(root, "child")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, child.Worktree, "commit", "--allow-empty", "-m", "child work")
+	if _, _, err := svc.Approve("parent"); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, parent.Worktree, "commit", "--allow-empty", "-m", "parent follow-up")
+	snapshot, err := svc.PrepareReview("child")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.DependencyStatus != review.AwaitingPrerequisite {
+		t.Fatalf("dependency after parent changed = %s", snapshot.DependencyStatus)
+	}
+}
+
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", args...)

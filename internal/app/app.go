@@ -135,6 +135,76 @@ func (s Service) Resume(id string) (task.Task, error) {
 	return entry, nil
 }
 
+func (s Service) MarkReady(id string) (task.Task, error) {
+	entry, err := s.Ledger.Get(id)
+	if err != nil {
+		return task.Task{}, err
+	}
+	if entry.Lifecycle != task.Active && entry.Lifecycle != task.InReview {
+		return task.Task{}, fmt.Errorf("task %q cannot be marked ready from %s", id, entry.Lifecycle)
+	}
+	entry.Lifecycle = task.ReadyForReview
+	task.Touch(&entry)
+	if err := s.Ledger.Save(entry, "chore(arw): mark task ready "+id); err != nil {
+		return task.Task{}, err
+	}
+	return entry, nil
+}
+
+func (s Service) MarkMerged(id string) (task.Task, error) {
+	entry, err := s.Ledger.Get(id)
+	if err != nil {
+		return task.Task{}, err
+	}
+	if entry.Lifecycle != task.Approved {
+		return task.Task{}, fmt.Errorf("task %q must be approved before recording a merge", id)
+	}
+	entry.Lifecycle = task.Merged
+	task.Touch(&entry)
+	if err := s.Ledger.Save(entry, "chore(arw): record merged task "+id); err != nil {
+		return task.Task{}, err
+	}
+	return entry, nil
+}
+
+func (s Service) Abandon(id string) (task.Task, error) {
+	entry, err := s.Ledger.Get(id)
+	if err != nil {
+		return task.Task{}, err
+	}
+	if entry.Lifecycle == task.Merged || entry.Lifecycle == task.Abandoned {
+		return task.Task{}, fmt.Errorf("cannot abandon %s task", entry.Lifecycle)
+	}
+	entry.Lifecycle = task.Abandoned
+	task.Touch(&entry)
+	if err := s.Ledger.Save(entry, "chore(arw): abandon task "+id); err != nil {
+		return task.Task{}, err
+	}
+	return entry, nil
+}
+
+func (s Service) RecordTest(id string, evidence task.TestEvidence) (task.Task, error) {
+	entry, err := s.Ledger.Get(id)
+	if err != nil {
+		return task.Task{}, err
+	}
+	if entry.Lifecycle == task.Merged || entry.Lifecycle == task.Abandoned {
+		return task.Task{}, fmt.Errorf("cannot record test evidence for %s task", entry.Lifecycle)
+	}
+	if evidence.RecordedAt == "" {
+		evidence.RecordedAt = time.Now().Format(time.RFC3339)
+	}
+	if err := evidence.Validate(); err != nil {
+		return task.Task{}, err
+	}
+	entry.Tests = append(entry.Tests, evidence)
+	task.Touch(&entry)
+	if err := s.Ledger.Save(entry, "chore(arw): record test evidence for "+id); err != nil {
+		return task.Task{}, err
+	}
+	return entry, nil
+}
+
 func (s Service) PrepareReview(id string) (review.Snapshot, error) {
 	entry, err := s.Ledger.Get(id)
 	if err != nil {

@@ -35,3 +35,16 @@ func TestValidID(t *testing.T) {
 		}
 	}
 }
+
+func TestTestEvidenceValidation(t *testing.T) {
+	for _, evidence := range []TestEvidence{{Command: "go test ./...", Result: "passed"}, {Command: "manual review", Result: "skipped"}} {
+		if err := evidence.Validate(); err != nil {
+			t.Errorf("Validate(%#v) error = %v", evidence, err)
+		}
+	}
+	for _, evidence := range []TestEvidence{{Result: "passed"}, {Command: "go test ./...", Result: "complete"}} {
+		if err := evidence.Validate(); err == nil {
+			t.Errorf("Validate(%#v) succeeded", evidence)
+		}
+	}
+}

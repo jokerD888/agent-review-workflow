@@ -40,6 +40,13 @@ state, test evidence, and risks. A child task is conditionally reviewable until
 its parent has final approval. `arw review approve --confirm <task-id>` records
 a human conclusion only; it cannot merge or push.
 
+Record test evidence without executing arbitrary commands with `arw task
+record-test --command "go test ./..." --result passed <task-id>`. Use `arw task
+ready <task-id>` when implementation is ready to review. After a human-approved
+task is merged outside ARW, record that fact with `arw task mark-merged --confirm
+<task-id>`; `arw task abandon --confirm <task-id>` records an abandoned task
+without deleting its branch or worktree.
+
 The TypeScript extension is in `vscode-extension/`. Run `npm ci && npm run
 package` there, then install the generated VSIX. It displays the task tree and
 opens immutable Git-SHA-to-Git-SHA native VS Code diffs, so the visible diff is
@@ -91,10 +98,11 @@ new terminal after installation, then run `arw help`.
 
 ## v2 release installation
 
-After the first signed v2 release is published, install only versioned Release
-assets (never a mutable `main` script). The installers download the matching
-binary, verify `checksums.txt`, add its user-local `bin` directory to PATH, and
-can install the VSIX:
+Install only versioned Release assets (never a mutable `main` script). The
+installers download the matching binary, verify `checksums.txt`, add its
+user-local `bin` directory to PATH, and can install the VSIX. Each release also
+has GitHub build provenance attached by the release workflow; installers verify
+the checksum manifest but do not currently verify attestations locally:
 
 ```powershell
 irm https://raw.githubusercontent.com/jokerD888/agent-review-workflow/main/installers/install.ps1 -OutFile install-arw.ps1

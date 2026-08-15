@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/jokerD888/agent-review-workflow/internal/app"
@@ -60,7 +61,7 @@ func run(args []string) error {
 func taskCommand(svc app.Service, args []string) error {
 	args, jsonOutput := withoutFormat(args)
 	if len(args) == 0 {
-		return errors.New("usage: arw task <start|list|show|park|resume> ...")
+		return errors.New("usage: arw task <start|list|show|park|resume|ready|mark-merged|abandon|record-test> ...")
 	}
 	switch args[0] {
 	case "start":
@@ -121,6 +122,61 @@ func taskCommand(svc app.Service, args []string) error {
 			return errors.New("usage: arw task resume <task-id> [--format json]")
 		}
 		entry, err := svc.Resume(args[1])
+		if err != nil {
+			return err
+		}
+		return output(entry, jsonOutput)
+	case "ready":
+		if len(args) != 2 {
+			return errors.New("usage: arw task ready <task-id> [--format json]")
+		}
+		entry, err := svc.MarkReady(args[1])
+		if err != nil {
+			return err
+		}
+		return output(entry, jsonOutput)
+	case "mark-merged":
+		mergedArgs, confirm := stripBool(args[1:], "--confirm")
+		if len(mergedArgs) != 1 || !confirm {
+			return errors.New("usage: arw task mark-merged --confirm <task-id>")
+		}
+		entry, err := svc.MarkMerged(mergedArgs[0])
+		if err != nil {
+			return err
+		}
+		return output(entry, jsonOutput)
+	case "abandon":
+		abandonArgs, confirm := stripBool(args[1:], "--confirm")
+		if len(abandonArgs) != 1 || !confirm {
+			return errors.New("usage: arw task abandon --confirm <task-id>")
+		}
+		entry, err := svc.Abandon(abandonArgs[0])
+		if err != nil {
+			return err
+		}
+		return output(entry, jsonOutput)
+	case "record-test":
+		fs := flag.NewFlagSet("task record-test", flag.ContinueOnError)
+		fs.SetOutput(os.Stderr)
+		command := fs.String("command", "", "test command")
+		result := fs.String("result", "", "passed|failed|skipped|unknown")
+		exitCode := fs.String("exit-code", "", "process exit code")
+		summary := fs.String("summary", "", "test summary")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if len(fs.Args()) != 1 {
+			return errors.New("usage: arw task record-test --command <command> --result <result> [--exit-code n] [--summary text] <task-id>")
+		}
+		var code *int
+		if *exitCode != "" {
+			value, err := strconv.Atoi(*exitCode)
+			if err != nil {
+				return fmt.Errorf("invalid --exit-code: %w", err)
+			}
+			code = &value
+		}
+		entry, err := svc.RecordTest(fs.Args()[0], task.TestEvidence{Command: *command, Result: *result, ExitCode: code, Summary: *summary})
 		if err != nil {
 			return err
 		}
@@ -306,7 +362,9 @@ Usage:
   arw setup | doctor | refresh
   arw task start [--id id] [--kind kind] [--base ref] [--parent task-id] <title>
   arw task list [--view reviewable|active|parked|blocked]
-  arw task show|park|resume <task-id>
+  arw task show|park|resume|ready <task-id>
+  arw task mark-merged|abandon --confirm <task-id>
+  arw task record-test --command <command> --result <passed|failed|skipped|unknown> [--exit-code n] [--summary text] <task-id>
   arw review prepare|status <task-id>
   arw review approve --confirm <task-id>
   arw review request-changes <task-id> [--reason text]

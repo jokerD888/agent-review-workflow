@@ -180,6 +180,55 @@ func execute(call toolCall) (any, error) {
 			return nil, err
 		}
 		return svc.Resume(id)
+	case "workflow_mark_ready":
+		id, err := requiredString(args, "task_id")
+		if err != nil {
+			return nil, err
+		}
+		return svc.MarkReady(id)
+	case "workflow_record_test":
+		id, err := requiredString(args, "task_id")
+		if err != nil {
+			return nil, err
+		}
+		command, err := requiredString(args, "command")
+		if err != nil {
+			return nil, err
+		}
+		result, err := requiredString(args, "result")
+		if err != nil {
+			return nil, err
+		}
+		evidence := task.TestEvidence{Command: command, Result: result}
+		if summary, ok := args["summary"].(string); ok {
+			evidence.Summary = summary
+		}
+		if code, ok := args["exit_code"].(float64); ok {
+			if code != float64(int(code)) {
+				return nil, fmt.Errorf("exit_code must be an integer")
+			}
+			value := int(code)
+			evidence.ExitCode = &value
+		}
+		return svc.RecordTest(id, evidence)
+	case "workflow_mark_merged":
+		id, err := requiredString(args, "task_id")
+		if err != nil {
+			return nil, err
+		}
+		if confirmed, _ := args["confirm"].(bool); !confirmed {
+			return nil, fmt.Errorf("confirm must be true before recording a merge")
+		}
+		return svc.MarkMerged(id)
+	case "workflow_abandon_task":
+		id, err := requiredString(args, "task_id")
+		if err != nil {
+			return nil, err
+		}
+		if confirmed, _ := args["confirm"].(bool); !confirmed {
+			return nil, fmt.Errorf("confirm must be true before abandoning a task")
+		}
+		return svc.Abandon(id)
 	case "workflow_refresh":
 		entries, err := svc.Tasks()
 		if err != nil {
@@ -228,6 +277,10 @@ func definitions() []map[string]any {
 		{"name": "workflow_open_review", "description": "Locate a task worktree; set new_window true only when the user explicitly asks to open VS Code.", "inputSchema": map[string]any{"type": "object", "required": []string{"task_id"}, "properties": withTask(map[string]any{"new_window": map[string]any{"type": "boolean"}})}},
 		{"name": "workflow_park_task", "description": "Park a task while preserving its branch, worktree, and review history.", "inputSchema": map[string]any{"type": "object", "required": []string{"task_id"}, "properties": withTask(nil)}},
 		{"name": "workflow_resume_task", "description": "Resume a parked task.", "inputSchema": map[string]any{"type": "object", "required": []string{"task_id"}, "properties": withTask(nil)}},
+		{"name": "workflow_mark_ready", "description": "Record that a task is ready for review. This does not merge, push, or modify source code.", "inputSchema": map[string]any{"type": "object", "required": []string{"task_id"}, "properties": withTask(nil)}},
+		{"name": "workflow_record_test", "description": "Record existing test evidence only; this tool never executes the command.", "inputSchema": map[string]any{"type": "object", "required": []string{"task_id", "command", "result"}, "properties": withTask(map[string]any{"command": map[string]any{"type": "string"}, "result": map[string]any{"type": "string", "enum": []string{"passed", "failed", "skipped", "unknown"}}, "exit_code": map[string]any{"type": "integer"}, "summary": map[string]any{"type": "string"}})}},
+		{"name": "workflow_mark_merged", "description": "Record a completed merge after the user confirms it occurred. This never performs a merge or remote action.", "inputSchema": map[string]any{"type": "object", "required": []string{"task_id", "confirm"}, "properties": withTask(map[string]any{"confirm": map[string]any{"type": "boolean"}})}},
+		{"name": "workflow_abandon_task", "description": "Record that a task was abandoned after the user confirms it. This retains its branch and worktree.", "inputSchema": map[string]any{"type": "object", "required": []string{"task_id", "confirm"}, "properties": withTask(map[string]any{"confirm": map[string]any{"type": "boolean"}})}},
 		{"name": "workflow_refresh", "description": "Refresh local task context without modifying Git history.", "inputSchema": map[string]any{"type": "object", "properties": cwd}},
 	}
 }

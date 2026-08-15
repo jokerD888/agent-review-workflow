@@ -15,7 +15,7 @@ func TestDefinitionsExposeOnlyConstrainedTools(t *testing.T) {
 		}
 		seen[name] = true
 	}
-	for _, required := range []string{"workflow_context", "workflow_list_tasks", "workflow_start_task", "workflow_prepare_review", "workflow_open_review", "workflow_park_task", "workflow_resume_task", "workflow_refresh"} {
+	for _, required := range []string{"workflow_context", "workflow_list_tasks", "workflow_start_task", "workflow_prepare_review", "workflow_open_review", "workflow_park_task", "workflow_resume_task", "workflow_mark_ready", "workflow_record_test", "workflow_mark_merged", "workflow_abandon_task", "workflow_refresh"} {
 		if !seen[required] {
 			t.Errorf("required tool %q is absent", required)
 		}
