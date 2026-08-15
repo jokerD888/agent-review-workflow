@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jokerD888/agent-review-workflow/internal/review"
@@ -68,6 +69,32 @@ func TestStackedTasksRequireParentApproval(t *testing.T) {
 	}
 	if entry.Lifecycle != task.Approved || entry.Review.Status != task.ReviewApproved {
 		t.Fatalf("approved task = lifecycle %s review %s", entry.Lifecycle, entry.Review.Status)
+	}
+}
+
+func TestApproveRequiresKnownCleanWorktree(t *testing.T) {
+	root := t.TempDir()
+	repo := filepath.Join(root, "repo")
+	if err := os.Mkdir(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "init", "--initial-branch=main")
+	runGit(t, repo, "config", "user.name", "ARW Test")
+	runGit(t, repo, "config", "user.email", "arw-test@example.invalid")
+	runGit(t, repo, "commit", "--allow-empty", "-m", "initial")
+	svc, err := New(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, err := svc.Start(StartOptions{Title: "Feature A", ID: "feature-a", Kind: "feature", WorktreePath: filepath.Join(root, "feature-a")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(started.Worktree); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := svc.Approve("feature-a"); err == nil || !strings.Contains(err.Error(), "current status: unknown") {
+		t.Fatalf("Approve() error = %v, want unavailable worktree status", err)
 	}
 }
 

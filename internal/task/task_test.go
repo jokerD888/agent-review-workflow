@@ -10,9 +10,16 @@ func TestValidateAcceptsMinimalTask(t *testing.T) {
 }
 
 func TestValidateRejectsUnsafeBranch(t *testing.T) {
-	entry := Task{SchemaVersion: SchemaVersion, ID: "fix-login", Title: "Fix login", Branch: "main", Base: Base{SHA: "0123456789012345678901234567890123456789"}, Lifecycle: Active, Review: Review{Status: ReviewNone}}
+	entry := Task{SchemaVersion: SchemaVersion, ID: "fix-login", Title: "Fix login", Kind: "bugfix", Branch: "arw/another-task", Base: Base{Ref: "main", SHA: "0123456789012345678901234567890123456789"}, Lifecycle: Active, Review: Review{Status: ReviewNone}}
 	if err := entry.Validate(); err == nil {
-		t.Fatal("Validate() accepted a non-ARW branch")
+		t.Fatal("Validate() accepted a branch for another task")
+	}
+}
+
+func TestValidateRejectsUnsupportedKind(t *testing.T) {
+	entry := Task{SchemaVersion: SchemaVersion, ID: "fix-login", Title: "Fix login", Kind: "urgent", Branch: "arw/fix-login", Base: Base{Ref: "main", SHA: "0123456789012345678901234567890123456789"}, Lifecycle: Active, Review: Review{Status: ReviewNone}}
+	if err := entry.Validate(); err == nil {
+		t.Fatal("Validate() accepted an unsupported kind")
 	}
 }
 
@@ -22,7 +29,7 @@ func TestValidID(t *testing.T) {
 			t.Errorf("ValidID(%q) = false", id)
 		}
 	}
-	for _, id := range []string{"", "-start", "end-", "Upper", "contains/slash"} {
+	for _, id := range []string{"", "-start", "end-", "contains--dash", "Upper", "contains/slash"} {
 		if ValidID(id) {
 			t.Errorf("ValidID(%q) = true", id)
 		}

@@ -108,6 +108,14 @@ set_managed_block() {
 
   cleaned_path="$TEMP_DIRECTORY/cleaned-$(basename "$target_path")"
   if [ -f "$target_path" ]; then
+    if ! awk -v start="$MARKER_START" -v end="$MARKER_END" '
+      $0 == start { if (inside) { bad = 1; exit }; inside = 1; next }
+      $0 == end { if (!inside) { bad = 1; exit }; inside = 0; next }
+      END { if (inside) { bad = 1 }; exit bad }
+    ' "$target_path"; then
+      echo "Refusing to update malformed agent-review-workflow markers in $target_path. Repair the marker block first." >&2
+      return 1
+    fi
     awk -v start="$MARKER_START" -v end="$MARKER_END" '
       $0 == start { inside = 1; next }
       $0 == end { inside = 0; next }

@@ -186,8 +186,8 @@ func (s Service) Approve(id string) (task.Task, review.Snapshot, error) {
 	if snapshot.DependencyStatus != review.DependencyClear {
 		return task.Task{}, review.Snapshot{}, fmt.Errorf("cannot record final approval while dependency status is %s", snapshot.DependencyStatus)
 	}
-	if snapshot.WorkingTree == "dirty" {
-		return task.Task{}, review.Snapshot{}, fmt.Errorf("cannot record approval with uncommitted task changes")
+	if snapshot.WorkingTree != "clean" {
+		return task.Task{}, review.Snapshot{}, fmt.Errorf("cannot record approval until the task worktree status is clean (current status: %s)", snapshot.WorkingTree)
 	}
 	entry.Lifecycle = task.Approved
 	entry.Review = task.Review{Status: task.ReviewApproved, ReviewedBaseSHA: snapshot.Base.SHA, ReviewedHeadSHA: snapshot.Head.SHA}

@@ -82,6 +82,9 @@ func Prepare(git gitclient.Client, current task.Task, all []task.Task) (Snapshot
 	if workingTree == "dirty" {
 		risks = append(risks, "Task worktree contains uncommitted changes; the committed review range does not include them.")
 	}
+	if workingTree == "unknown" {
+		risks = append(risks, "Task worktree status could not be determined; final approval is unavailable until it can be checked.")
+	}
 	if dependency == AwaitingPrerequisite {
 		risks = append(risks, "Parent task has not received final approval; this is a conditional review.")
 	}

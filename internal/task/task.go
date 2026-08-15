@@ -75,11 +75,17 @@ func (t Task) Validate() error {
 	if strings.TrimSpace(t.Title) == "" {
 		return fmt.Errorf("task title is required")
 	}
-	if !strings.HasPrefix(t.Branch, "arw/") {
-		return fmt.Errorf("task branch must start with arw/")
+	if !ValidKind(t.Kind) {
+		return fmt.Errorf("invalid task kind %q", t.Kind)
 	}
-	if len(t.Base.SHA) != 40 {
-		return fmt.Errorf("base SHA must be a full Git SHA")
+	if t.Branch != "arw/"+t.ID {
+		return fmt.Errorf("task branch must be arw/%s", t.ID)
+	}
+	if strings.TrimSpace(t.Base.Ref) == "" {
+		return fmt.Errorf("base ref is required")
+	}
+	if !ValidSHA(t.Base.SHA) {
+		return fmt.Errorf("base SHA must be a full lowercase Git SHA")
 	}
 	if !validLifecycle(t.Lifecycle) {
 		return fmt.Errorf("invalid lifecycle %q", t.Lifecycle)
@@ -91,11 +97,31 @@ func (t Task) Validate() error {
 }
 
 func ValidID(id string) bool {
-	if id == "" || strings.HasPrefix(id, "-") || strings.HasSuffix(id, "-") {
+	if id == "" || strings.HasPrefix(id, "-") || strings.HasSuffix(id, "-") || strings.Contains(id, "--") {
 		return false
 	}
 	for _, r := range id {
 		if !(r >= 'a' && r <= 'z') && !(r >= '0' && r <= '9') && r != '-' {
+			return false
+		}
+	}
+	return true
+}
+
+func ValidKind(kind string) bool {
+	switch kind {
+	case "feature", "bugfix", "maintenance", "refactor", "spike", "other":
+		return true
+	}
+	return false
+}
+
+func ValidSHA(sha string) bool {
+	if len(sha) != 40 {
+		return false
+	}
+	for _, r := range sha {
+		if !(r >= '0' && r <= '9') && !(r >= 'a' && r <= 'f') {
 			return false
 		}
 	}

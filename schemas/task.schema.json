@@ -28,8 +28,8 @@
       "required": ["status", "reviewed_base_sha", "reviewed_head_sha"],
       "properties": {
         "status": { "type": "string", "enum": ["none", "changes_requested", "conditional", "approved", "stale"] },
-        "reviewed_base_sha": { "type": ["string", "null"], "pattern": "^[0-9a-f]{40}$" },
-        "reviewed_head_sha": { "type": ["string", "null"], "pattern": "^[0-9a-f]{40}$" }
+        "reviewed_base_sha": { "type": "string", "pattern": "^(|[0-9a-f]{40})$" },
+        "reviewed_head_sha": { "type": "string", "pattern": "^(|[0-9a-f]{40})$" }
       }
     },
     "dependencies": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },

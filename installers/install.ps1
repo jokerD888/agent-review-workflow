@@ -34,38 +34,58 @@ function Set-ManagedRules([string]$Path, [string]$RulesPath) {
     $block = "$begin`r`n$rules`r`n$end"
     $existing = if (Test-Path -LiteralPath $Path) { Get-Content -Raw -LiteralPath $Path } else { '' }
     $pattern = '(?s)' + [regex]::Escape($begin) + '.*?' + [regex]::Escape($end)
+    $starts = [regex]::Matches($existing, [regex]::Escape($begin)).Count
+    $ends = [regex]::Matches($existing, [regex]::Escape($end)).Count
+    $blocks = [regex]::Matches($existing, $pattern).Count
+    if ($starts -ne $ends -or $blocks -ne $starts) {
+        throw "Refusing to update malformed agent-review-workflow markers in $Path. Repair the marker block first."
+    }
     $updated = if ([regex]::IsMatch($existing, $pattern)) { [regex]::Replace($existing, $pattern, $block) } elseif ([string]::IsNullOrWhiteSpace($existing)) { "$block`r`n" } else { "$($existing.TrimEnd())`r`n`r`n$block`r`n" }
     Set-Content -LiteralPath $Path -Value $updated -Encoding utf8
 }
 
+function ConvertTo-TomlBasicString([string]$Value) {
+    return '"' + $Value.Replace('\', '\\').Replace('"', '\"') + '"'
+}
+
 function Set-AgentMcpConfig([string]$RulesPath) {
     $mcpPath = Join-Path $BinDirectory 'arw-mcp.exe'
-    $codexConfig = Join-Path $env:USERPROFILE '.codex\config.toml'
-    Set-ManagedRules (Join-Path $env:USERPROFILE '.codex\AGENTS.md') $RulesPath
-    Set-ManagedRules (Join-Path $env:USERPROFILE '.claude\CLAUDE.md') $RulesPath
-    Set-ManagedRules (Join-Path $env:USERPROFILE '.config\opencode\AGENTS.md') $RulesPath
-    {
-        New-Item -ItemType Directory -Path (Split-Path -Parent $codexConfig) -Force | Out-Null
-        $begin = '# agent-review-workflow:mcp:begin'; $end = '# agent-review-workflow:mcp:end'
-        $block = "$begin`r`n[mcp_servers.arw]`r`ncommand = '$mcpPath'`r`nstartup_timeout_sec = 30`r`n$end"
-        $existing = if (Test-Path -LiteralPath $codexConfig) { Get-Content -Raw -LiteralPath $codexConfig } else { '' }
-        $pattern = '(?s)' + [regex]::Escape($begin) + '.*?' + [regex]::Escape($end)
-        $updated = if ([regex]::IsMatch($existing, $pattern)) { [regex]::Replace($existing, $pattern, $block) } else { "$($existing.TrimEnd())`r`n`r`n$block`r`n" }
-        Set-Content -LiteralPath $codexConfig -Value $updated -Encoding utf8
-    }
+    $userHome = $env:USERPROFILE
+    $codexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $userHome '.codex' }
+    $codexConfig = Join-Path $codexHome 'config.toml'
+    Set-ManagedRules (Join-Path $codexHome 'AGENTS.md') $RulesPath
+    Set-ManagedRules (Join-Path $userHome '.claude\CLAUDE.md') $RulesPath
+    Set-ManagedRules (Join-Path $userHome '.config\opencode\AGENTS.md') $RulesPath
+    New-Item -ItemType Directory -Path (Split-Path -Parent $codexConfig) -Force | Out-Null
+    $begin = '# agent-review-workflow:mcp:begin'; $end = '# agent-review-workflow:mcp:end'
+    $block = "$begin`r`n[mcp_servers.arw]`r`ncommand = $(ConvertTo-TomlBasicString $mcpPath)`r`nstartup_timeout_sec = 30`r`n$end"
+    $existing = if (Test-Path -LiteralPath $codexConfig) { Get-Content -Raw -LiteralPath $codexConfig } else { '' }
+    $pattern = '(?s)' + [regex]::Escape($begin) + '.*?' + [regex]::Escape($end)
+    $updated = if ([regex]::IsMatch($existing, $pattern)) { [regex]::Replace($existing, $pattern, $block) } else { "$($existing.TrimEnd())`r`n`r`n$block`r`n" }
+    Set-Content -LiteralPath $codexConfig -Value $updated -Encoding utf8
     if (Get-Command claude -ErrorAction SilentlyContinue) { & claude mcp add --scope user arw -- $mcpPath | Out-Host }
     if (Get-Command opencode -ErrorAction SilentlyContinue) {
-        $configPath = Join-Path $env:USERPROFILE '.config\opencode\opencode.json'
+        $configPath = Join-Path $userHome '.config\opencode\opencode.json'
         $config = if (Test-Path -LiteralPath $configPath) { Get-Content -Raw -LiteralPath $configPath | ConvertFrom-Json -AsHashtable } else { @{} }
+        if ($config -isnot [System.Collections.IDictionary]) { throw 'OpenCode configuration root must be an object.' }
         if (-not $config.ContainsKey('mcp')) { $config.mcp = @{} }
-        $majorVersion = [int](((& opencode --version) -split '\.')[0])
+        if ($config.mcp -isnot [System.Collections.IDictionary]) { throw 'OpenCode mcp configuration must be an object.' }
+        $versionMatch = [regex]::Match((& opencode --version), '\d+')
+        if (-not $versionMatch.Success) { throw 'Could not determine the OpenCode major version.' }
+        $majorVersion = [int]$versionMatch.Value
         $server = @{ type = 'local'; command = @($mcpPath) }
         if ($majorVersion -ge 2) {
             if (-not $config.mcp.ContainsKey('servers')) { $config.mcp.servers = @{} }
             $server.timeout = @{ startup = 30000 }
             $config.mcp.servers.arw = $server
         } else {
-            if ($config.mcp.ContainsKey('servers')) { $config.mcp.Remove('servers') }
+            if ($config.mcp.ContainsKey('servers')) {
+                $servers = $config.mcp.servers
+                if ($servers -isnot [System.Collections.IDictionary] -or @($servers.Keys | Where-Object { $_ -ne 'arw' }).Count -ne 0) {
+                    throw 'Refusing to remove unrelated mcp.servers entries for OpenCode v1; migrate them manually.'
+                }
+                $config.mcp.Remove('servers')
+            }
             $server.enabled = $true
             $server.timeout = 30000
             $config.mcp.arw = $server

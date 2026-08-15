@@ -79,6 +79,12 @@ function Set-ManagedBlock {
     }
 
     $pattern = '(?s)' + [regex]::Escape($MarkerStart) + '.*?' + [regex]::Escape($MarkerEnd)
+    $starts = [regex]::Matches($existing, [regex]::Escape($MarkerStart)).Count
+    $ends = [regex]::Matches($existing, [regex]::Escape($MarkerEnd)).Count
+    $blocks = [regex]::Matches($existing, $pattern).Count
+    if ($starts -ne $ends -or $blocks -ne $starts) {
+        throw "Refusing to update malformed agent-review-workflow markers in $Path. Repair the marker block first."
+    }
     if ([regex]::IsMatch($existing, $pattern)) {
         $updated = [regex]::Replace($existing, $pattern, [System.Text.RegularExpressions.MatchEvaluator]{ param($match) $block })
     } elseif ([string]::IsNullOrWhiteSpace($existing)) {
