@@ -13,12 +13,12 @@ Agent Review Workflow（ARW）让开发者以自然语言管理 AI 编写代码�
 ### 1.1 必须达成的结果
 
 - 以**任务**而不是日期或临时分支作为工作单元。
-- 每个任务保存分支、基准提交、依赖任务、生命周期和审查快照。
+- 每个任务保存分支、基准提交、单一父任务、生命周期和人工审查结论。
 - 支持独立任务和堆叠任务（例如 `main <- A <- B`）。
 - 在 Codex、Claude Code、OpenCode 中用自然语言触发受限的工作流操作。
 - 在 Windows 和 Linux 上使用同一个短命令 `arw`，且不依赖保留本地源码仓库。
 - 输出精确的审查 base/head SHA，使开发者可在 VS Code Source Control 或 GitLens 中查看正确范围的 diff。
-- 默认不打断正在使用的 VS Code 窗口；需要时才在新窗口打开另一个任务。
+- 不操纵编辑器窗口；审查材料只返回 worktree 路径与精确的比较范围。
 - 审查、合并、推送和代码改写都有可审计、可确认的边界。
 
 ### 1.2 明确不做的事
@@ -67,8 +67,7 @@ Git / worktree         任务台账元数据分支
 | 任务（Task） | 一个可独立理解、测试和审查的工作单元。 |
 | 基准（Base） | 创建或审查任务时使用的具体 Git 提交，而不仅是 `main` 这个会移动的名字。 |
 | 父任务（Parent） | 当前任务直接建立在其上的任务，例如 B 建立在 A 上。 |
-| 审查快照（Review Snapshot） | 某次审查时的 `base SHA`、`head SHA`、文件统计及结论。 |
-| 条件审查 | B 相对未最终验收的 A 所做的审查；不能等同于 B 相对 `main` 的最终验收。 |
+| 审查材料（Review Snapshot） | `prepare_review` 即时计算的 `base SHA`、`head SHA`、文件统计、依赖与批准有效性；不写入台账。 |
 | 搁置（Parked） | 暂不推进但保留任务和历史；与放弃不同。 |
 | Worktree | 同一 Git 仓库的独立工作目录，用来同时保留不同任务的代码现场。 |
 
@@ -79,9 +78,9 @@ Git / worktree         任务台账元数据分支
 ### 4.1 生命周期
 
 ```text
-active -> ready_for_review -> in_review -> approved -> merged
-   |              |                |             |
-   +------------> parked <---------+-------------+
+active -> ready_for_review -> merged
+   |              |             |
+   +------------> parked <------+
    |
    +------------> abandoned
 ```
@@ -89,9 +88,7 @@ active -> ready_for_review -> in_review -> approved -> merged
 | 值 | 含义 |
 | --- | --- |
 | `active` | 正在开发或等待继续开发。 |
-| `ready_for_review` | 工作区干净、已生成审查材料，等待人工审查。 |
-| `in_review` | 人正在审查。 |
-| `approved` | 人明确确认通过，但尚未合并。 |
+| `ready_for_review` | 实现已提交审查；是否已批准由审查结论单独记录。 |
 | `parked` | 暂不推进；可带有已审或未审结论。 |
 | `merged` | 已确认进入目标分支。 |
 | `abandoned` | 明确不再需要；保留历史和原因。 |
@@ -102,9 +99,9 @@ active -> ready_for_review -> in_review -> approved -> merged
 | --- | --- |
 | `none` | 尚未有人记录审查结论。 |
 | `changes_requested` | 审查要求修改。 |
-| `conditional` | 相对父任务审过，但父任务尚未最终验收。 |
 | `approved` | 对本次基准和 HEAD 的人工审查通过。 |
-| `stale` | 代码、基准或父任务已变；旧结论不可再视为当前结论。 |
+
+批准是否仍有效不是持久化状态：`prepare_review` 根据当前 base、HEAD 和父任务即时派生为 `not_approved`、`current` 或 `stale`，避免出现互相矛盾的生命周期与审查状态。
 
 ### 4.3 依赖状态
 
@@ -115,7 +112,7 @@ active -> ready_for_review -> in_review -> approved -> merged
 | `clear` | 没有阻塞当前最终审查的依赖。 |
 | `awaiting_prerequisite_review` | 父任务未最终审查/未合入。 |
 | `parent_changed` | 父任务在当前任务审查后发生变化，必须复核。 |
-| `blocked` | 其他显式依赖未满足。 |
+| `blocked` | 父任务记录不可用等无法计算依赖的异常。 |
 
 ### 4.4 任务记录示例
 
@@ -125,7 +122,6 @@ active -> ready_for_review -> in_review -> approved -> merged
 schema_version: 1
 id: fix-login-redirect
 title: 修复登录跳转
-kind: bugfix
 branch: arw/fix-login-redirect
 base:
   ref: main
@@ -136,7 +132,6 @@ review:
   status: none
   reviewed_base_sha: null
   reviewed_head_sha: null
-dependencies: []
 created_at: 2026-08-12T09:00:00+08:00
 updated_at: 2026-08-12T11:00:00+08:00
 ```
@@ -198,14 +193,14 @@ main <- arw/feature-a <- arw/feature-b
 规则：
 
 1. 审查 B 时，比较 `A...B`，只看 B 相对 A 的改动。
-2. 如果 A 尚未验收，B 的结论只能是 `conditional`。
+2. 如果 A 尚未验收，仍可查看 B 的审查材料，但不能记录 B 的最终批准。
 3. 建议先审 A；用户仍可自由先审 B。
-4. 用户明确批准 B 并单独要求合并后，可将 B 快进合入记录的父分支 A；此时 A 的 HEAD 已变化，A 原有批准失效，需要重新审查后才能继续向上合并。
+4. 用户明确批准 B 并单独要求合并后，可将 B 快进合入记录的父分支 A；此时 A 的 HEAD 已变化，A 的批准有效性变为 `stale`，需要重新审查后才能继续向上合并。
 5. 工具不自动解决冲突，也不会把批准等同于合并或推送授权。
 
 ### 6.3 审查失效规则
 
-以下任意情形发生，相关审查快照转为 `stale`：
+以下任意情形发生，`prepare_review` 返回的批准有效性为 `stale`：
 
 - 任务 HEAD 改变；
 - 审查基准 SHA 改变；
@@ -230,8 +225,7 @@ C:\code\my-app-worktrees\
 
 - 一个任务对应一个 worktree；一个 worktree 同一时刻只允许一个写入 Agent。
 - `arw task start` 在当前项目的配置位置创建任务 worktree。
-- 当前 VS Code 窗口通常就是当前任务的 worktree；不会因审查其他任务被切走。
-- `arw worktree open <task>` 只打开目标任务，不切换或覆盖原窗口。
+- 当前 VS Code 窗口通常就是当前任务的 worktree；ARW 不会因审查其他任务而切换或打开窗口。
 - 不自动 stash 未提交改动。开始新任务或切换上下文时，如工作区不干净，必须报告并要求用户决定。
 - `.env`、数据库、端口、生成依赖不由 Git worktree 自动复制。任务可声明运行前置条件，避免不同 worktree 争用同一数据库或端口。
 
@@ -242,9 +236,9 @@ C:\code\my-app-worktrees\
 | 用户表达 | 默认动作 | 不会发生的动作 |
 | --- | --- | --- |
 | “开始修复登录跳转” | 创建/定位任务、分支、worktree、基准记录。 | 不会改 `main`、不会推送。 |
-| “有哪些待审任务？” | 列出 `ready_for_review` 与 `in_review`，并标出依赖阻塞。 | 不把所有分支混入结果。 |
+| “有哪些待审任务？” | 列出 `ready_for_review`，并标出依赖阻塞。 | 不把所有分支混入结果。 |
 | “审查登录跳转” | 生成审查快照和对话摘要。 | 不切换 VS Code、不合并。 |
-| “在 VS Code 中审查数据库修复” | 生成审查快照，并在新窗口打开目标 worktree。 | 不抢占当前编码窗口。 |
+| “在 VS Code 中审查数据库修复” | 生成审查材料，返回目标 worktree 与 SHA 范围。 | 不操纵编辑器窗口。 |
 | “先搁置功能 A” | 记录为 `parked`，保留审查结论。 | 不删除分支或代码。 |
 | “A 审查通过” | 复述任务、基准、HEAD 和影响；确认后记录人工批准。 | 不自动 merge/push。 |
 | “把 A 合并到父分支” | 校验批准与版本，快进合入记录的父/base 分支并更新台账。 | 不选择任意目标、不解决冲突、不 push。 |
@@ -265,23 +259,17 @@ B 依赖 A；推荐先审 A。
 ```text
 arw setup
 arw doctor
-arw update
-
 arw task start "修复登录跳转"
 arw task list [--view reviewable|active|parked|blocked]
 arw task show <task-id>
 arw task park <task-id>
 arw task resume <task-id>
 arw task merge --confirm <task-id>
-arw task mark-merged --confirm <task-id>
+arw task abandon --confirm <task-id>
 
 arw review prepare <task-id>
-arw review status <task-id>
 arw review approve --confirm --base <reviewed-base-sha> --head <reviewed-head-sha> <task-id>
 arw review request-changes <task-id> [--reason text]
-
-arw worktree open <task-id>
-arw refresh
 ```
 
 所有可供程序消费的子命令支持：
@@ -295,6 +283,7 @@ arw refresh
 ```json
 {
   "taskId": "fix-login-redirect",
+  "worktree": "C:\\code\\my-app-worktrees\\fix-login-redirect",
   "base": { "ref": "main", "sha": "1a2b3c4d" },
   "head": { "sha": "7d8e9f00" },
   "comparison": "main@1a2b3c4d...HEAD@7d8e9f00",
@@ -303,6 +292,7 @@ arw refresh
   "workingTree": "clean",
   "dependencyStatus": "clear",
   "reviewStatus": "none",
+  "approvalValidity": "not_approved",
   "risks": []
 }
 ```
@@ -314,20 +304,17 @@ arw refresh
 允许暴露的工具：
 
 ```text
-workflow_context()
 workflow_list_tasks(filter)
+workflow_get_task(task_id)
 workflow_start_task(title, parent_task?)
 workflow_prepare_review(task_id)
-workflow_open_review(task_id, new_window)
 workflow_park_task(task_id)
 workflow_resume_task(task_id)
 workflow_mark_ready(task_id)
 workflow_approve_task(task_id, expected_base_sha, expected_head_sha, confirm)
 workflow_request_changes(task_id, reason?)
 workflow_merge_task(task_id, confirm)
-workflow_mark_merged(task_id, confirm)
 workflow_abandon_task(task_id, confirm)
-workflow_refresh()
 ```
 
 不暴露的工具：
@@ -350,12 +337,12 @@ git branch --delete
 
 - 安装统一的安全规则和自然语言映射；
 - 配置本地 `arw-mcp`；
-- 告知 Agent：先读取任务上下文，再写代码或准备审查；
+- 告知 Agent：已知任务先读取 `workflow_get_task`，未知任务用 `workflow_list_tasks`；
 - 使 Codex、Claude Code、OpenCode 调用同一组工具和同一状态机。
 
 ## 11. 审查界面边界
 
-ARW 不实现自定义 VS Code 扩展，也不试图替代 Git 的历史和 diff 界面。`arw review prepare <task-id>` 返回本次审查的不可变 `base SHA` 和 `head SHA`，同时记录任务、依赖和风险上下文。
+ARW 不实现自定义 VS Code 扩展，也不试图替代 Git 的历史和 diff 界面。`arw review prepare <task-id>` 即时返回本次审查的精确 `base SHA` 和 `head SHA`，以及任务、依赖和风险上下文；该查询不写入台账。
 
 - 常规任务审查：在对应 task worktree 中使用 VS Code Source Control / Source Control Graph，对比任务分支与记录的 base 分支或提交。
 - 任意两个历史提交的全量比较：使用 GitLens 或 `git diff <base-sha> <head-sha>`。
@@ -377,13 +364,14 @@ ARW 不实现自定义 VS Code 扩展，也不试图替代 Git 的历史和 diff
 
 ### 12.2 审计内容
 
-审查快照记录：
+任务台账记录：
 
 - 任务 ID、操作者标识、时间；
 - base SHA、head SHA、父任务状态；
 - 变更文件/提交统计；
-- 审查结论与原因；
-- 结论何时、为何失效。
+- 人工审查结论及其绑定的 base/head SHA。
+
+`prepare_review` 的文件统计、提交列表、脏工作区和派生有效性只在调用时计算并返回，不写入台账、也不为一次查看创建 Git 提交。
 
 不记录源代码全文、密钥和环境变量。
 
@@ -415,7 +403,7 @@ GitHub Release
 | Windows | `%LOCALAPPDATA%\\AgentReviewWorkflow` |
 | Linux | `$XDG_DATA_HOME/agent-review-workflow`，默认 `~/.local/share/agent-review-workflow` |
 
-升级必须显式执行 `arw update`，并显示版本、校验结果和变更摘要。不得从 GitHub `main` 分支直接下载并执行未经版本固定的业务脚本。
+升级必须显式重跑版本固定的安装器，并显示版本、校验结果和变更摘要。不得从 GitHub `main` 分支直接下载并执行未经版本固定的业务脚本。
 
 ## 14. 仓库结构
 
@@ -441,14 +429,12 @@ agent-review-workflow/
 └─ .github/workflows/
 ```
 
-现有 `arw.ps1`、`arw.sh` 与 `scripts/` 作为 v1 兼容层保留到 v2 迁移完成，再在明确的主版本升级中弃用。
-
 ## 15. 实施分期与验收标准
 
 ### Phase 0：规范冻结与仓库准备
 
 - 加入本文、JSON Schema 初稿、架构决策记录（ADR）。
-- 标明 v1 已有能力和 v2 目标能力。
+- 标明 v2 的目标能力与明确边界。
 - 验收：新开发者只读文档即可理解范围、不可自动化的操作及任务关系。
 
 ### Phase 1：Go Core MVP
@@ -460,7 +446,7 @@ agent-review-workflow/
 ### Phase 2：审查快照与依赖图
 
 - 实现正确的 `base...head` 比较、未提交改动检测、提交/文件统计。
-- 实现父子任务、条件审查和审查失效。
+- 实现单父任务、批准门禁和批准有效性派生。
 - 验收：`main <- A <- B` 下，B 不会被错误标记为最终通过。
 
 ### Phase 3：MCP 与 Agent 适配
@@ -487,16 +473,15 @@ agent-review-workflow/
 
 用户在任一支持的 AI 中说：
 
-> 审查数据库修复，并在 VS Code 中打开。
+> 审查数据库修复。
 
 系统必须能够：
 
 1. 找到“数据库修复”任务，或在存在歧义时要求澄清；
 2. 检查其分支、worktree、基准 SHA 和依赖；
-3. 若依赖未验收，建议先审父任务，并明确本次只能是条件审查；
-4. 生成真实的审查快照和风险摘要；
-5. 在不影响当前编码窗口的前提下，按需打开目标任务的 VS Code worktree；
-6. 返回精确的 base/head SHA，用户用 VS Code Source Control 或 GitLens 查看变更；
+3. 若依赖未验收，建议先审父任务，并明确此时不能记录最终批准；
+4. 即时计算审查材料和风险摘要，不写入台账；
+5. 返回目标 worktree 与精确的 base/head SHA，用户用 VS Code Source Control 或 GitLens 查看变更；
 7. 在用户未单独要求时不 merge，并且不自行 push、rebase、reset 或删除任何工作内容。
 
 满足这一场景，即说明 ARW 的核心价值已真正落地。

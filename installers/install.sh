@@ -94,7 +94,7 @@ else:
     servers = mcp.get("servers")
     if servers:
         if not isinstance(servers, dict) or set(servers) != {"arw"}:
-            raise SystemExit("Refusing to remove unrelated mcp.servers entries for OpenCode v1; migrate them manually.")
+            raise SystemExit("Refusing to remove unrelated mcp.servers entries for legacy OpenCode configuration; migrate them manually.")
         mcp.pop("servers")
     server["enabled"] = True
     server["timeout"] = 30000

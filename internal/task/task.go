@@ -13,8 +13,6 @@ type Lifecycle string
 const (
 	Active         Lifecycle = "active"
 	ReadyForReview Lifecycle = "ready_for_review"
-	InReview       Lifecycle = "in_review"
-	Approved       Lifecycle = "approved"
 	Parked         Lifecycle = "parked"
 	Merged         Lifecycle = "merged"
 	Abandoned      Lifecycle = "abandoned"
@@ -25,9 +23,7 @@ type ReviewStatus string
 const (
 	ReviewNone             ReviewStatus = "none"
 	ReviewChangesRequested ReviewStatus = "changes_requested"
-	ReviewConditional      ReviewStatus = "conditional"
 	ReviewApproved         ReviewStatus = "approved"
-	ReviewStale            ReviewStatus = "stale"
 )
 
 type Base struct {
@@ -42,18 +38,16 @@ type Review struct {
 }
 
 type Task struct {
-	SchemaVersion int            `yaml:"schema_version" json:"schemaVersion"`
-	ID            string         `yaml:"id" json:"id"`
-	Title         string         `yaml:"title" json:"title"`
-	Kind          string         `yaml:"kind" json:"kind"`
-	Branch        string         `yaml:"branch" json:"branch"`
-	Base          Base           `yaml:"base" json:"base"`
-	ParentTask    string         `yaml:"parent_task" json:"parentTask,omitempty"`
-	Lifecycle     Lifecycle      `yaml:"lifecycle" json:"lifecycle"`
-	Review        Review         `yaml:"review" json:"review"`
-	Dependencies  []string       `yaml:"dependencies" json:"dependencies"`
-	CreatedAt     string         `yaml:"created_at" json:"createdAt"`
-	UpdatedAt     string         `yaml:"updated_at" json:"updatedAt"`
+	SchemaVersion int       `yaml:"schema_version" json:"schemaVersion"`
+	ID            string    `yaml:"id" json:"id"`
+	Title         string    `yaml:"title" json:"title"`
+	Branch        string    `yaml:"branch" json:"branch"`
+	Base          Base      `yaml:"base" json:"base"`
+	ParentTask    string    `yaml:"parent_task" json:"parentTask,omitempty"`
+	Lifecycle     Lifecycle `yaml:"lifecycle" json:"lifecycle"`
+	Review        Review    `yaml:"review" json:"review"`
+	CreatedAt     string    `yaml:"created_at" json:"createdAt"`
+	UpdatedAt     string    `yaml:"updated_at" json:"updatedAt"`
 }
 
 func (t Task) Validate() error {
@@ -65,9 +59,6 @@ func (t Task) Validate() error {
 	}
 	if strings.TrimSpace(t.Title) == "" {
 		return fmt.Errorf("task title is required")
-	}
-	if !ValidKind(t.Kind) {
-		return fmt.Errorf("invalid task kind %q", t.Kind)
 	}
 	if t.Branch != "arw/"+t.ID {
 		return fmt.Errorf("task branch must be arw/%s", t.ID)
@@ -99,14 +90,6 @@ func ValidID(id string) bool {
 	return true
 }
 
-func ValidKind(kind string) bool {
-	switch kind {
-	case "feature", "bugfix", "maintenance", "refactor", "spike", "other":
-		return true
-	}
-	return false
-}
-
 func ValidSHA(sha string) bool {
 	if len(sha) != 40 {
 		return false
@@ -123,7 +106,7 @@ func Touch(t *Task) { t.UpdatedAt = time.Now().Format(time.RFC3339) }
 
 func validLifecycle(value Lifecycle) bool {
 	switch value {
-	case Active, ReadyForReview, InReview, Approved, Parked, Merged, Abandoned:
+	case Active, ReadyForReview, Parked, Merged, Abandoned:
 		return true
 	}
 	return false
@@ -131,7 +114,7 @@ func validLifecycle(value Lifecycle) bool {
 
 func validReview(value ReviewStatus) bool {
 	switch value {
-	case ReviewNone, ReviewChangesRequested, ReviewConditional, ReviewApproved, ReviewStale:
+	case ReviewNone, ReviewChangesRequested, ReviewApproved:
 		return true
 	}
 	return false

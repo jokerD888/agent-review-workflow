@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jokerD888/agent-review-workflow/internal/ledger"
 	"github.com/jokerD888/agent-review-workflow/internal/review"
 	"github.com/jokerD888/agent-review-workflow/internal/task"
 )
@@ -30,7 +31,7 @@ func TestStackedTasksRequireParentApproval(t *testing.T) {
 	if err := svc.Setup(); err != nil {
 		t.Fatal(err)
 	}
-	a, err := svc.Start(StartOptions{Title: "Feature A", ID: "feature-a", Kind: "feature", WorktreePath: filepath.Join(root, "feature-a")})
+	a, err := svc.Start(StartOptions{Title: "Feature A", ID: "feature-a", WorktreePath: filepath.Join(root, "feature-a")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +68,7 @@ func TestStackedTasksRequireParentApproval(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if entry.Lifecycle != task.Approved || entry.Review.Status != task.ReviewApproved {
+	if entry.Lifecycle != task.ReadyForReview || entry.Review.Status != task.ReviewApproved {
 		t.Fatalf("approved task = lifecycle %s review %s", entry.Lifecycle, entry.Review.Status)
 	}
 	merged, err := svc.Merge("feature-b")
@@ -81,7 +82,11 @@ func TestStackedTasksRequireParentApproval(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if parentAfterMerge.Lifecycle != task.ReadyForReview || parentAfterMerge.Review.Status != task.ReviewStale {
+	parentSnapshot, err := svc.PrepareReview("feature-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parentAfterMerge.Lifecycle != task.ReadyForReview || parentAfterMerge.Review.Status != task.ReviewApproved || parentSnapshot.ApprovalValidity != review.ApprovalStale {
 		t.Fatalf("parent after child merge = lifecycle %s review %s", parentAfterMerge.Lifecycle, parentAfterMerge.Review.Status)
 	}
 }
@@ -100,7 +105,7 @@ func TestApproveRequiresKnownCleanWorktree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	started, err := svc.Start(StartOptions{Title: "Feature A", ID: "feature-a", Kind: "feature", WorktreePath: filepath.Join(root, "feature-a")})
+	started, err := svc.Start(StartOptions{Title: "Feature A", ID: "feature-a", WorktreePath: filepath.Join(root, "feature-a")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,6 +114,39 @@ func TestApproveRequiresKnownCleanWorktree(t *testing.T) {
 	}
 	if _, _, err := approveCurrent(t, svc, "feature-a"); err == nil || !strings.Contains(err.Error(), "current status: unknown") {
 		t.Fatalf("Approve() error = %v, want unavailable worktree status", err)
+	}
+}
+
+func TestPrepareReviewDoesNotWriteRegistry(t *testing.T) {
+	root := t.TempDir()
+	repo := filepath.Join(root, "repo")
+	if err := os.Mkdir(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "init", "--initial-branch=main")
+	runGit(t, repo, "config", "user.name", "ARW Test")
+	runGit(t, repo, "config", "user.email", "arw-test@example.invalid")
+	runGit(t, repo, "commit", "--allow-empty", "-m", "initial")
+	svc, err := New(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Start(StartOptions{Title: "Feature A", ID: "feature-a", WorktreePath: filepath.Join(root, "feature-a")}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := svc.Git.Resolve(ledger.RegistryBranch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.PrepareReview("feature-a"); err != nil {
+		t.Fatal(err)
+	}
+	after, err := svc.Git.Resolve(ledger.RegistryBranch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before != after {
+		t.Fatalf("PrepareReview() moved registry from %s to %s", before, after)
 	}
 }
 
@@ -126,7 +164,7 @@ func TestApproveRejectsHeadChangedSinceReview(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	started, err := svc.Start(StartOptions{Title: "Feature A", ID: "feature-a", Kind: "feature", WorktreePath: filepath.Join(root, "feature-a")})
+	started, err := svc.Start(StartOptions{Title: "Feature A", ID: "feature-a", WorktreePath: filepath.Join(root, "feature-a")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +193,7 @@ func TestTaskLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	started, err := svc.Start(StartOptions{Title: "Feature A", ID: "feature-a", Kind: "feature", WorktreePath: filepath.Join(root, "feature-a")})
+	started, err := svc.Start(StartOptions{Title: "Feature A", ID: "feature-a", WorktreePath: filepath.Join(root, "feature-a")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,15 +201,16 @@ func TestTaskLifecycle(t *testing.T) {
 	if err != nil || entry.Lifecycle != task.ReadyForReview {
 		t.Fatalf("MarkReady() = %#v, %v", entry, err)
 	}
-	if _, err := svc.MarkMerged(started.Task.ID); err == nil {
-		t.Fatal("MarkMerged() succeeded before approval")
+	if _, err := svc.Merge(started.Task.ID); err == nil {
+		t.Fatal("Merge() succeeded before approval")
 	}
 	if _, _, err := approveCurrent(t, svc, started.Task.ID); err != nil {
 		t.Fatal(err)
 	}
-	entry, err = svc.MarkMerged(started.Task.ID)
+	merged, err := svc.Merge(started.Task.ID)
+	entry = merged.Task
 	if err != nil || entry.Lifecycle != task.Merged {
-		t.Fatalf("MarkMerged() = %#v, %v", entry, err)
+		t.Fatalf("Merge() = %#v, %v", entry, err)
 	}
 	if _, _, err := approveCurrent(t, svc, started.Task.ID); err == nil {
 		t.Fatal("Approve() succeeded for merged task")
@@ -180,7 +219,7 @@ func TestTaskLifecycle(t *testing.T) {
 		t.Fatal("RequestChanges() succeeded for merged task")
 	}
 
-	abandoned, err := svc.Start(StartOptions{Title: "Feature B", ID: "feature-b", Kind: "feature", WorktreePath: filepath.Join(root, "feature-b")})
+	abandoned, err := svc.Start(StartOptions{Title: "Feature B", ID: "feature-b", WorktreePath: filepath.Join(root, "feature-b")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,7 +243,7 @@ func TestMergeApprovedTaskFastForwardsRecordedBase(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	started, err := svc.Start(StartOptions{Title: "Feature A", ID: "feature-a", Kind: "feature", WorktreePath: filepath.Join(root, "feature-a")})
+	started, err := svc.Start(StartOptions{Title: "Feature A", ID: "feature-a", WorktreePath: filepath.Join(root, "feature-a")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -246,7 +285,7 @@ func TestMergeRejectsTargetThatMovedAfterApproval(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	started, err := svc.Start(StartOptions{Title: "Feature A", ID: "feature-a", Kind: "feature", WorktreePath: filepath.Join(root, "feature-a")})
+	started, err := svc.Start(StartOptions{Title: "Feature A", ID: "feature-a", WorktreePath: filepath.Join(root, "feature-a")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,14 +294,14 @@ func TestMergeRejectsTargetThatMovedAfterApproval(t *testing.T) {
 		t.Fatal(err)
 	}
 	runGit(t, repo, "commit", "--allow-empty", "-m", "main advanced")
-	if _, err := svc.Merge(started.Task.ID); err == nil || !strings.Contains(err.Error(), "moved from reviewed base") {
-		t.Fatalf("Merge() error = %v, want moved target rejection", err)
+	if _, err := svc.Merge(started.Task.ID); err == nil || !strings.Contains(err.Error(), "approval is no longer current") {
+		t.Fatalf("Merge() error = %v, want stale approval rejection", err)
 	}
 	entry, err := svc.Task(started.Task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if entry.Lifecycle != task.Approved {
+	if entry.Lifecycle != task.ReadyForReview {
 		t.Fatalf("task lifecycle after rejected merge = %s", entry.Lifecycle)
 	}
 }
@@ -281,12 +320,12 @@ func TestChildReviewRequiresReapprovalWhenParentChanges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	parent, err := svc.Start(StartOptions{Title: "Parent", ID: "parent", Kind: "feature", WorktreePath: filepath.Join(root, "parent")})
+	parent, err := svc.Start(StartOptions{Title: "Parent", ID: "parent", WorktreePath: filepath.Join(root, "parent")})
 	if err != nil {
 		t.Fatal(err)
 	}
 	runGit(t, parent.Worktree, "commit", "--allow-empty", "-m", "parent work")
-	child, err := svc.Start(StartOptions{Title: "Child", ID: "child", Kind: "feature", ParentTask: "parent", WorktreePath: filepath.Join(root, "child")})
+	child, err := svc.Start(StartOptions{Title: "Child", ID: "child", ParentTask: "parent", WorktreePath: filepath.Join(root, "child")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -316,9 +355,18 @@ func runGit(t *testing.T, dir string, args ...string) {
 
 func approveCurrent(t *testing.T, svc Service, id string) (task.Task, review.Snapshot, error) {
 	t.Helper()
-	snapshot, err := svc.ReviewStatus(id)
+	entry, err := svc.Task(id)
 	if err != nil {
-		t.Fatal(err)
+		return task.Task{}, review.Snapshot{}, err
+	}
+	if entry.Lifecycle == task.Active {
+		if _, err := svc.MarkReady(id); err != nil {
+			return task.Task{}, review.Snapshot{}, err
+		}
+	}
+	snapshot, err := svc.PrepareReview(id)
+	if err != nil {
+		return task.Task{}, review.Snapshot{}, err
 	}
 	return svc.Approve(id, snapshot.Base.SHA, snapshot.Head.SHA)
 }

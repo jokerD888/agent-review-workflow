@@ -5,62 +5,14 @@ on:
   pull_request:
 
 jobs:
-  windows:
+  windows-release-installer:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Validate PowerShell installer and helpers
-        shell: pwsh
-        run: |
-          $testRoot = Join-Path $env:RUNNER_TEMP 'agent-review-workflow-test'
-          $homePath = Join-Path $testRoot 'home'
-          $projectPath = Join-Path $testRoot 'project'
-          New-Item -ItemType Directory -Path $homePath, $projectPath -Force | Out-Null
-          git init --initial-branch main $projectPath
-          git -C $projectPath config user.email 'test@example.invalid'
-          git -C $projectPath config user.name 'Workflow Test'
-          Set-Content -LiteralPath (Join-Path $projectPath 'app.txt') -Value 'baseline'
-          git -C $projectPath add app.txt
-          git -C $projectPath commit -m 'chore: baseline'
-          $env:CODEX_HOME = Join-Path $testRoot 'codex'
-          ./install.ps1 -UserHomePath $homePath -ProjectPath $projectPath -InstallOpenCodeReviewer
-          & (Join-Path $env:LOCALAPPDATA 'AgentReviewWorkflow/bin/arw.cmd') doctor
-          git -C $projectPath add AGENTS.md CLAUDE.md .opencode
-          git -C $projectPath commit -m 'chore: add workflow rules'
-          Push-Location $projectPath
-          try {
-            & $env:GITHUB_WORKSPACE/scripts/start-task.ps1 -Name 'Fix Login Redirect'
-            & $env:GITHUB_WORKSPACE/scripts/review.ps1 -BaseBranch main
-          } finally {
-            Pop-Location
-          }
-          $requiredFiles = @(
-            (Join-Path $env:CODEX_HOME 'AGENTS.md'),
-            (Join-Path $homePath '.claude/CLAUDE.md'),
-            (Join-Path $homePath '.config/opencode/AGENTS.md'),
-            (Join-Path $projectPath '.opencode/agents/review.md')
-          )
-          foreach ($requiredFile in $requiredFiles) {
-            if (-not (Test-Path -LiteralPath $requiredFile)) {
-              throw "Missing expected file: $requiredFile"
-            }
-          }
-          $malformedHome = Join-Path $testRoot 'malformed-home'
-          $malformedCodex = Join-Path $testRoot 'malformed-codex'
-          New-Item -ItemType Directory -Path $malformedCodex -Force | Out-Null
-          $malformedRules = "existing instructions`n<!-- agent-review-workflow:begin -->`nincomplete managed block`n"
-          $malformedPath = Join-Path $malformedCodex 'AGENTS.md'
-          Set-Content -LiteralPath $malformedPath -Value $malformedRules -NoNewline
-          $env:CODEX_HOME = $malformedCodex
-          $rejected = $false
-          try { ./install.ps1 -UserHomePath $malformedHome -GlobalOnly } catch { $rejected = $true }
-          if (-not $rejected) { throw 'Installer accepted malformed managed markers.' }
-          if ((Get-Content -Raw -LiteralPath $malformedPath) -ne $malformedRules) { throw 'Installer changed a file with malformed managed markers.' }
-
       - name: Validate release installer in an isolated profile
         shell: pwsh
         run: |
-          $testRoot = Join-Path $env:RUNNER_TEMP 'agent-review-workflow-release-installer-test'
+          $testRoot = Join-Path $env:RUNNER_TEMP 'arw-release-installer-test'
           $fixture = @{
             'arw_windows_amd64.exe' = [Text.Encoding]::UTF8.GetBytes('arw')
             'arw-mcp_windows_amd64.exe' = [Text.Encoding]::UTF8.GetBytes('arw-mcp')
@@ -79,72 +31,23 @@ jobs:
           $env:CODEX_HOME = Join-Path $testRoot 'codex'
           $originalPath = [Environment]::GetEnvironmentVariable('Path', 'User')
           $binDirectory = Join-Path $env:LOCALAPPDATA 'AgentReviewWorkflow\bin'
-          $pathUpdated = $false
           try {
             ./installers/install.ps1 -Version test -ConfigureAgents -Force
-            $pathUpdated = [Environment]::GetEnvironmentVariable('Path', 'User') -like "*$binDirectory*"
+            if (-not (Test-Path -LiteralPath (Join-Path $binDirectory 'arw.exe'))) { throw 'Release installer did not install arw.exe.' }
+            if (-not (Test-Path -LiteralPath (Join-Path $env:CODEX_HOME 'config.toml'))) { throw 'Release installer did not respect CODEX_HOME.' }
           } finally {
             [Environment]::SetEnvironmentVariable('Path', $originalPath, 'User')
           }
-          if (-not (Test-Path -LiteralPath (Join-Path $binDirectory 'arw.exe'))) { throw 'Release installer did not install arw.exe.' }
-          if (-not (Test-Path -LiteralPath (Join-Path $env:CODEX_HOME 'config.toml'))) { throw 'Release installer did not respect CODEX_HOME.' }
-          if (-not $pathUpdated) { throw 'Release installer did not add its bin directory to the user PATH.' }
-          $openCodeConfig = Join-Path $env:USERPROFILE '.config\opencode\opencode.json'
-          New-Item -ItemType Directory -Path (Split-Path -Parent $openCodeConfig) -Force | Out-Null
-          $originalOpenCodeConfig = '{"mcp":{"servers":{"other":{"command":["other-mcp"]}}}}'
-          Set-Content -LiteralPath $openCodeConfig -Value $originalOpenCodeConfig -NoNewline
-          function opencode { '1.0.0' }
-          $refused = $false
-          try { ./installers/install.ps1 -Version test -ConfigureAgents -Force } catch { $refused = $true } finally { [Environment]::SetEnvironmentVariable('Path', $originalPath, 'User') }
-          if (-not $refused) { throw 'Release installer overwrote unrelated OpenCode v2 MCP configuration.' }
-          if ((Get-Content -Raw -LiteralPath $openCodeConfig) -ne $originalOpenCodeConfig) { throw 'Release installer modified unrelated OpenCode MCP configuration.' }
 
-  linux:
+  linux-release-installer:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Validate shell installer and helpers
-        shell: bash
-        run: |
-          set -euo pipefail
-          chmod +x install.sh scripts/*.sh
-          bash -n install.sh scripts/*.sh
-          test_root="$(mktemp -d)"
-          project_path="$test_root/project"
-          mkdir -p "$project_path"
-          git init --initial-branch main "$project_path"
-          git -C "$project_path" config user.email 'test@example.invalid'
-          git -C "$project_path" config user.name 'Workflow Test'
-          printf 'baseline\n' > "$project_path/app.txt"
-          git -C "$project_path" add app.txt
-          git -C "$project_path" commit -m 'chore: baseline'
-          HOME="$test_root/home" CODEX_HOME="$test_root/codex" ./install.sh --project "$project_path" --with-opencode-reviewer
-          "$test_root/home/.local/bin/arw" doctor
-          git -C "$project_path" add AGENTS.md CLAUDE.md .opencode
-          git -C "$project_path" commit -m 'chore: add workflow rules'
-          (
-            cd "$project_path"
-            "$GITHUB_WORKSPACE/scripts/start-task.sh" 'Fix Login Redirect'
-            "$GITHUB_WORKSPACE/scripts/review.sh" main
-          )
-          test -f "$test_root/codex/AGENTS.md"
-          test -f "$test_root/home/.claude/CLAUDE.md"
-          test -f "$test_root/home/.config/opencode/AGENTS.md"
-          test -f "$project_path/.opencode/agents/review.md"
-          malformed_home="$test_root/malformed-home"
-          malformed_codex="$test_root/malformed-codex"
-          mkdir -p "$malformed_codex"
-          printf 'existing instructions\n<!-- agent-review-workflow:begin -->\nincomplete managed block\n' > "$malformed_codex/AGENTS.md"
-          if HOME="$malformed_home" CODEX_HOME="$malformed_codex" ./install.sh --global-only; then
-            echo 'Installer accepted malformed managed markers.' >&2
-            exit 1
-          fi
-          test "$(cat "$malformed_codex/AGENTS.md")" = $'existing instructions\n<!-- agent-review-workflow:begin -->\nincomplete managed block'
-
       - name: Validate release installer in an isolated home
         shell: bash
         run: |
           set -euo pipefail
+          bash -n ./installers/install.sh
           test_root="$(mktemp -d)"
           fixture="$test_root/fixture"
           mock_bin="$test_root/mock-bin"

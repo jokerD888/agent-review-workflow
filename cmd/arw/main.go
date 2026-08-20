@@ -44,14 +44,10 @@ func run(args []string) error {
 		return svc.Setup()
 	case "doctor":
 		return doctor(svc, hasJSON(args))
-	case "refresh":
-		return refresh(svc, hasJSON(args))
 	case "task":
 		return taskCommand(svc, args[1:])
 	case "review":
 		return reviewCommand(svc, args[1:])
-	case "worktree":
-		return worktreeCommand(svc, args[1:])
 	default:
 		return fmt.Errorf("unknown command %q; run 'arw help'", args[0])
 	}
@@ -60,14 +56,13 @@ func run(args []string) error {
 func taskCommand(svc app.Service, args []string) error {
 	args, jsonOutput := withoutFormat(args)
 	if len(args) == 0 {
-		return errors.New("usage: arw task <start|list|show|park|resume|ready|merge|mark-merged|abandon> ...")
+		return errors.New("usage: arw task <start|list|show|park|resume|ready|merge|abandon> ...")
 	}
 	switch args[0] {
 	case "start":
 		fs := flag.NewFlagSet("task start", flag.ContinueOnError)
 		fs.SetOutput(os.Stderr)
 		id := fs.String("id", "", "task id")
-		kind := fs.String("kind", "other", "task kind")
 		base := fs.String("base", "main", "base Git ref")
 		parent := fs.String("parent", "", "parent task id")
 		worktreePath := fs.String("worktree", "", "worktree path")
@@ -79,7 +74,7 @@ func taskCommand(svc app.Service, args []string) error {
 		if title == "" {
 			return errors.New("usage: arw task start [--id id] [--parent task-id] <title>")
 		}
-		result, err := svc.Start(app.StartOptions{Title: title, ID: *id, Kind: *kind, BaseRef: *base, ParentTask: *parent, WorktreePath: *worktreePath})
+		result, err := svc.Start(app.StartOptions{Title: title, ID: *id, BaseRef: *base, ParentTask: *parent, WorktreePath: *worktreePath})
 		if err != nil {
 			return err
 		}
@@ -144,16 +139,6 @@ func taskCommand(svc app.Service, args []string) error {
 			return err
 		}
 		return output(result, jsonOutput)
-	case "mark-merged":
-		mergedArgs, confirm := stripBool(args[1:], "--confirm")
-		if len(mergedArgs) != 1 || !confirm {
-			return errors.New("usage: arw task mark-merged --confirm <task-id>")
-		}
-		entry, err := svc.MarkMerged(mergedArgs[0])
-		if err != nil {
-			return err
-		}
-		return output(entry, jsonOutput)
 	case "abandon":
 		abandonArgs, confirm := stripBool(args[1:], "--confirm")
 		if len(abandonArgs) != 1 || !confirm {
@@ -172,7 +157,7 @@ func taskCommand(svc app.Service, args []string) error {
 func reviewCommand(svc app.Service, args []string) error {
 	args, jsonOutput := withoutFormat(args)
 	if len(args) == 0 {
-		return errors.New("usage: arw review <prepare|status|approve|request-changes> <task-id>")
+		return errors.New("usage: arw review <prepare|approve|request-changes> <task-id>")
 	}
 	switch args[0] {
 	case "prepare":
@@ -180,15 +165,6 @@ func reviewCommand(svc app.Service, args []string) error {
 			return errors.New("usage: arw review prepare <task-id> [--format json]")
 		}
 		snapshot, err := svc.PrepareReview(args[1])
-		if err != nil {
-			return err
-		}
-		return output(snapshot, jsonOutput)
-	case "status":
-		if len(args) < 2 {
-			return errors.New("usage: arw review status <task-id> [--format json]")
-		}
-		snapshot, err := svc.ReviewStatus(args[1])
 		if err != nil {
 			return err
 		}
@@ -237,18 +213,6 @@ func reviewCommand(svc app.Service, args []string) error {
 	}
 }
 
-func worktreeCommand(svc app.Service, args []string) error {
-	args, jsonOutput := withoutFormat(args)
-	if len(args) < 2 || args[0] != "open" {
-		return errors.New("usage: arw worktree open <task-id> [--format json]")
-	}
-	path, err := svc.OpenWorktree(args[1])
-	if err != nil {
-		return err
-	}
-	return output(map[string]string{"taskId": args[1], "worktree": path}, jsonOutput)
-}
-
 func doctor(svc app.Service, jsonOutput bool) error {
 	entries, err := svc.Tasks()
 	if err != nil && !strings.Contains(err.Error(), "not found") {
@@ -257,14 +221,6 @@ func doctor(svc app.Service, jsonOutput bool) error {
 	data := map[string]any{"version": version, "repository": svc.Git.Root, "registryBranch": ledger.RegistryBranch, "registryExists": svc.Git.BranchExists(ledger.RegistryBranch), "tasks": len(entries)}
 	return output(data, jsonOutput)
 }
-func refresh(svc app.Service, jsonOutput bool) error {
-	entries, err := svc.Tasks()
-	if err != nil {
-		return err
-	}
-	return output(map[string]any{"tasks": len(entries), "registryBranch": ledger.RegistryBranch}, jsonOutput)
-}
-
 func filter(entries []task.Task, view string) []task.Task {
 	if view == "" {
 		return entries
@@ -274,11 +230,11 @@ func filter(entries []task.Task, view string) []task.Task {
 		keep := false
 		switch view {
 		case "active":
-			keep = entry.Lifecycle == task.Active || entry.Lifecycle == task.InReview || entry.Lifecycle == task.ReadyForReview
+			keep = entry.Lifecycle == task.Active || entry.Lifecycle == task.ReadyForReview
 		case "parked":
 			keep = entry.Lifecycle == task.Parked
 		case "reviewable":
-			keep = entry.Lifecycle == task.ReadyForReview || entry.Lifecycle == task.InReview || entry.Lifecycle == task.Approved
+			keep = entry.Lifecycle == task.ReadyForReview
 		case "blocked":
 			keep = entry.ParentTask != "" && entry.Review.Status != task.ReviewApproved
 		default:
@@ -349,16 +305,15 @@ func printHelp() {
 	fmt.Print(`ARW v2 (development)
 
 Usage:
-  arw setup | doctor | refresh
-  arw task start [--id id] [--kind kind] [--base ref] [--parent task-id] <title>
+  arw setup | doctor
+  arw task start [--id id] [--base ref] [--parent task-id] <title>
   arw task list [--view reviewable|active|parked|blocked]
   arw task show|park|resume|ready <task-id>
   arw task merge --confirm <task-id>
-  arw task mark-merged|abandon --confirm <task-id>
-  arw review prepare|status <task-id>
+  arw task abandon --confirm <task-id>
+  arw review prepare <task-id>
   arw review approve --confirm --base <sha> --head <sha> <task-id>
   arw review request-changes <task-id> [--reason text]
-  arw worktree open <task-id>
 
 Add --format json to receive the stable machine interface.
 `)

@@ -5,9 +5,8 @@ and OpenCode. v2 tracks each unit of work as a task with a recorded base,
 dependency chain, review history, and dedicated worktree.
 
 > v2 is under active development. Its accepted architecture is documented in
-> [the final solution design](docs/FINAL-SOLUTION-DESIGN.zh-CN.md). The original
-> script workflow remains available as v1 compatibility only; do not mix its
-> write commands with the v2 task ledger in one repository.
+> [the final solution design](docs/FINAL-SOLUTION-DESIGN.zh-CN.md). This
+> repository supports only the Go-based v2 workflow.
 
 ## v2 development quick start
 
@@ -34,10 +33,11 @@ current conversation. If the intent is unclear, a configured agent should ask
 once whether this is temporary work or a reviewable ARW task. Say “开始 ARW” or
 “把这个纳入 ARW” to opt back in.
 
-For a review, run `arw review prepare <task-id>`. It returns the exact recorded
-base and task HEAD, commits, changed files, dirty-worktree status, dependency
-state, and risks. A child task is conditionally reviewable until
-its parent has final approval. After the user explicitly says the task passed,
+For a review, run `arw review prepare <task-id>`. It resolves and returns the
+exact current base and task HEAD, commits, changed files, dirty-worktree status, dependency
+state, approval validity, and risks. A child task can still be inspected before
+its parent is approved, but ARW refuses its final approval until the dependency
+is clear. After the user explicitly says the task passed,
 a configured agent can call `workflow_approve_task`; this records the user's
 conclusion for the exact base and HEAD they reviewed, not the agent's own
 judgment. If either SHA has changed, approval is refused.
@@ -46,13 +46,13 @@ Use `arw task ready <task-id>` when implementation is ready to review. A separat
 explicit user request can call `workflow_merge_task` or `arw task merge
 --confirm <task-id>` to fast-forward the approved task into its recorded
 parent/base branch. It refuses moved targets, dirty worktrees, non-fast-forward
-integration, and conflicts; it never pushes. `arw task mark-merged --confirm`
-remains available to record a merge completed outside ARW, while `arw task
-abandon --confirm` records an abandoned task without deleting its branch or
-worktree.
+integration, and conflicts; it never pushes. `arw task abandon --confirm`
+records an abandoned task without deleting its branch or worktree. External
+merges are intentionally not recorded by an unchecked command: reconcile them
+manually for now, or use ARW's validated local merge.
 
 ARW does not provide a custom editor extension. Use VS Code Source Control to
-inspect the task branch and its recorded base; use GitLens when you need an
+inspect the task branch and its recorded base ref; use GitLens when you need an
 arbitrary-ref comparison. ARW's responsibility is to return and validate the
 exact base/head SHA pair, not to replace mature Git diff interfaces.
 
@@ -69,36 +69,6 @@ agent's user-level instruction file. Existing instructions are preserved.
 
 The rules are guidance, not a security boundary. Keep approval prompts and Git
 branch protection enabled for actions you do not want an agent to perform.
-
-## Install on Windows
-
-Clone the repository, then run:
-
-```powershell
-./install.ps1
-```
-
-To also add the shared project-level rules to an existing repository:
-
-```powershell
-./install.ps1 -ProjectPath C:\code\my-project -InstallOpenCodeReviewer
-```
-
-The project setup creates or updates these files without overwriting existing
-content:
-
-```text
-my-project/
-├── AGENTS.md                    # Shared by Codex and OpenCode
-├── CLAUDE.md                    # Imports AGENTS.md for Claude Code
-└── .opencode/agents/review.md   # Optional read-only OpenCode reviewer
-```
-
-Review and commit the generated project files before using `start-task`; the
-helper deliberately refuses to create a task branch from a dirty working tree.
-
-The installer also installs the short `arw` command into your user PATH. Open a
-new terminal after installation, then run `arw help`.
 
 ## v2 release installation
 
@@ -127,53 +97,6 @@ typed `arw-mcp` service to Codex, Claude Code, and OpenCode. Restart those
 applications after installing. Linux OpenCode setup uses Python 3's standard
 JSON library to preserve existing user configuration.
 
-## v1 installation (compatibility only)
-
-For a quick user-level installation on Windows, run:
-
-```powershell
-irm https://raw.githubusercontent.com/jokerD888/agent-review-workflow/main/install.ps1 | iex
-```
-
-For macOS or Linux, run:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/jokerD888/agent-review-workflow/main/install.sh | sh
-```
-
-To configure a specific project, clone the repository and pass its local path
-to the installer as shown above.
-
-## Install on macOS or Linux
-
-```bash
-chmod +x install.sh
-./install.sh
-./install.sh --project ~/code/my-project --with-opencode-reviewer
-```
-
-## Daily workflow
-
-Start a focused task branch from `main` (or provide another base branch):
-
-```powershell
-arw start "fix login redirect"
-```
-
-Give the agent the business task. The installed rules tell it to avoid protected
-branches and remote changes, keep scope narrow, run relevant checks, and create
-local commits only at meaningful testable checkpoints.
-
-When ready to review, inspect the whole branch before merging:
-
-```powershell
-arw review -OpenVSCode
-```
-
-The review helper shows the diff stat, commits, whitespace errors, and opens the
-repository in VS Code. In VS Code, use Source Control and Source Control Graph
-to inspect `main...HEAD`, individual commits, and file-level diffs.
-
 ## Why task branches, not daily branches?
 
 A branch should describe a reviewable unit of product work. A date-based branch
@@ -192,12 +115,7 @@ markers. Remove that marked block from a target file to uninstall it.
 
 ```text
 rules/global.md                  Shared user-level behavior
-templates/AGENTS.md              Project-level shared template
-templates/CLAUDE.md              Claude Code compatibility shim
-templates/opencode-reviewer.md   Read-only OpenCode reviewer template
-install.ps1 / install.sh         Idempotent installers and CLI bootstrap
-arw.ps1 / arw.sh                 Cross-platform `arw` command dispatchers
-scripts/                         Start-task and review helpers
+installers/                      Versioned-release installers
 cmd/arw/                         v2 Go CLI
 cmd/arw-mcp/                     v2 stdio MCP server
 internal/                        v2 Git, ledger, task, review, worktree logic

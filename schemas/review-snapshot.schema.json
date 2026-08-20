@@ -4,11 +4,12 @@
   "title": "ARW Review Snapshot",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "task_id", "created_at", "base", "head", "comparison", "files", "commits", "working_tree", "dependency_status", "review_status", "risks"],
+  "required": ["schema_version", "task_id", "created_at", "worktree", "base", "head", "comparison", "files", "commits", "working_tree", "dependency_status", "review_status", "approval_validity", "risks"],
   "properties": {
     "schema_version": { "const": 1 },
     "task_id": { "type": "string" },
     "created_at": { "type": "string", "format": "date-time" },
+    "worktree": { "type": "string" },
     "base": { "$ref": "#/$defs/revision" },
     "head": { "$ref": "#/$defs/revision" },
     "comparison": { "type": "string" },
@@ -16,7 +17,8 @@
     "commits": { "type": "array", "items": { "$ref": "#/$defs/commit" } },
     "working_tree": { "type": "string", "enum": ["clean", "dirty", "unknown"] },
     "dependency_status": { "type": "string", "enum": ["clear", "awaiting_prerequisite_review", "parent_changed", "blocked"] },
-    "review_status": { "type": "string", "enum": ["none", "changes_requested", "conditional", "approved", "stale"] },
+    "review_status": { "type": "string", "enum": ["none", "changes_requested", "approved"] },
+    "approval_validity": { "type": "string", "enum": ["not_approved", "current", "stale"] },
     "risks": { "type": "array", "items": { "type": "string" } }
   },
   "$defs": {

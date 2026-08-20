@@ -28,7 +28,7 @@ func New(dir string) (Service, error) {
 	return Service{Git: client, Ledger: ledger.Store{Git: client}}, nil
 }
 
-type StartOptions struct{ Title, ID, Kind, BaseRef, ParentTask, WorktreePath string }
+type StartOptions struct{ Title, ID, BaseRef, ParentTask, WorktreePath string }
 
 type StartResult struct {
 	Task     task.Task `json:"task"`
@@ -61,9 +61,6 @@ func (s Service) Start(options StartOptions) (StartResult, error) {
 	if _, err := s.Ledger.Get(id); err == nil {
 		return StartResult{}, fmt.Errorf("task %q already exists", id)
 	}
-	if options.Kind == "" {
-		options.Kind = "other"
-	}
 	baseRef := options.BaseRef
 	if baseRef == "" {
 		baseRef = "main"
@@ -72,7 +69,6 @@ func (s Service) Start(options StartOptions) (StartResult, error) {
 	if err != nil {
 		return StartResult{}, err
 	}
-	dependencies := []string{}
 	parent := options.ParentTask
 	if parent != "" {
 		parentEntry, err := s.Ledger.Get(parent)
@@ -84,7 +80,6 @@ func (s Service) Start(options StartOptions) (StartResult, error) {
 		if err != nil {
 			return StartResult{}, err
 		}
-		dependencies = append(dependencies, parent)
 	}
 	branch := "arw/" + id
 	path := options.WorktreePath
@@ -101,7 +96,7 @@ func (s Service) Start(options StartOptions) (StartResult, error) {
 		return StartResult{}, err
 	}
 	now := time.Now().Format(time.RFC3339)
-	entry := task.Task{SchemaVersion: task.SchemaVersion, ID: id, Title: options.Title, Kind: options.Kind, Branch: branch, Base: task.Base{Ref: baseRef, SHA: baseSHA}, ParentTask: parent, Lifecycle: task.Active, Review: task.Review{Status: task.ReviewNone}, Dependencies: dependencies, CreatedAt: now, UpdatedAt: now}
+	entry := task.Task{SchemaVersion: task.SchemaVersion, ID: id, Title: options.Title, Branch: branch, Base: task.Base{Ref: baseRef, SHA: baseSHA}, ParentTask: parent, Lifecycle: task.Active, Review: task.Review{Status: task.ReviewNone}, CreatedAt: now, UpdatedAt: now}
 	if err := s.Ledger.Save(entry, "chore(arw): create task "+id); err != nil {
 		return StartResult{}, fmt.Errorf("task worktree was created, but saving its registry record failed: %w", err)
 	}
@@ -147,28 +142,12 @@ func (s Service) MarkReady(id string) (task.Task, error) {
 	if err != nil {
 		return task.Task{}, err
 	}
-	if entry.Lifecycle != task.Active && entry.Lifecycle != task.InReview {
+	if entry.Lifecycle != task.Active {
 		return task.Task{}, fmt.Errorf("task %q cannot be marked ready from %s", id, entry.Lifecycle)
 	}
 	entry.Lifecycle = task.ReadyForReview
 	task.Touch(&entry)
 	if err := s.Ledger.Save(entry, "chore(arw): mark task ready "+id); err != nil {
-		return task.Task{}, err
-	}
-	return entry, nil
-}
-
-func (s Service) MarkMerged(id string) (task.Task, error) {
-	entry, err := s.Ledger.Get(id)
-	if err != nil {
-		return task.Task{}, err
-	}
-	if entry.Lifecycle != task.Approved {
-		return task.Task{}, fmt.Errorf("task %q must be approved before recording a merge", id)
-	}
-	entry.Lifecycle = task.Merged
-	task.Touch(&entry)
-	if err := s.Ledger.Save(entry, "chore(arw): record merged task "+id); err != nil {
 		return task.Task{}, err
 	}
 	return entry, nil
@@ -183,7 +162,7 @@ func (s Service) Merge(id string) (MergeResult, error) {
 	if err != nil {
 		return MergeResult{}, err
 	}
-	if entry.Lifecycle != task.Approved || entry.Review.Status != task.ReviewApproved {
+	if entry.Lifecycle != task.ReadyForReview || entry.Review.Status != task.ReviewApproved {
 		return MergeResult{}, fmt.Errorf("task %q must have current human approval before merge", id)
 	}
 	all, err := s.Ledger.List()
@@ -194,7 +173,7 @@ func (s Service) Merge(id string) (MergeResult, error) {
 	if err != nil {
 		return MergeResult{}, err
 	}
-	if snapshot.ReviewStatus != task.ReviewApproved || snapshot.DependencyStatus != review.DependencyClear {
+	if snapshot.ApprovalValidity != review.ApprovalCurrent || snapshot.DependencyStatus != review.DependencyClear {
 		return MergeResult{}, fmt.Errorf("task %q approval is no longer current; prepare and complete review again", id)
 	}
 	if snapshot.WorkingTree != "clean" {
@@ -236,20 +215,6 @@ func (s Service) Merge(id string) (MergeResult, error) {
 	task.Touch(&entry)
 	if err := s.Ledger.Save(entry, "chore(arw): merge task "+id+" into "+targetBranch); err != nil {
 		return MergeResult{}, fmt.Errorf("task was merged into %q, but updating the registry failed: %w", targetBranch, err)
-	}
-	if entry.ParentTask != "" {
-		parent, err := s.Ledger.Get(entry.ParentTask)
-		if err != nil {
-			return MergeResult{}, fmt.Errorf("task was merged, but reloading parent task %q failed: %w", entry.ParentTask, err)
-		}
-		if parent.Review.Status == task.ReviewApproved || parent.Review.Status == task.ReviewConditional {
-			parent.Lifecycle = task.ReadyForReview
-			parent.Review.Status = task.ReviewStale
-			task.Touch(&parent)
-			if err := s.Ledger.Save(parent, "chore(arw): invalidate parent review after merging "+id); err != nil {
-				return MergeResult{}, fmt.Errorf("task was merged, but invalidating parent review failed: %w", err)
-			}
-		}
 	}
 	return MergeResult{Task: entry, SourceBranch: entry.Branch, TargetBranch: targetBranch, HeadSHA: mergedHead}, nil
 }
@@ -297,26 +262,7 @@ func (s Service) PrepareReview(id string) (review.Snapshot, error) {
 	if err != nil {
 		return review.Snapshot{}, err
 	}
-	review.MarkPrepared(&entry, snapshot)
-	if err := s.Ledger.Save(entry, "chore(arw): prepare review "+id); err != nil {
-		return review.Snapshot{}, err
-	}
-	if err := s.Ledger.SaveSnapshot(id, snapshot); err != nil {
-		return review.Snapshot{}, err
-	}
 	return snapshot, nil
-}
-
-func (s Service) ReviewStatus(id string) (review.Snapshot, error) {
-	entry, err := s.Ledger.Get(id)
-	if err != nil {
-		return review.Snapshot{}, err
-	}
-	all, err := s.Ledger.List()
-	if err != nil {
-		return review.Snapshot{}, err
-	}
-	return review.Prepare(s.Git, entry, all)
 }
 
 func (s Service) Approve(id, expectedBaseSHA, expectedHeadSHA string) (task.Task, review.Snapshot, error) {
@@ -334,12 +280,15 @@ func (s Service) Approve(id, expectedBaseSHA, expectedHeadSHA string) (task.Task
 	if err != nil {
 		return task.Task{}, review.Snapshot{}, err
 	}
-	if snapshot.Base.SHA != expectedBaseSHA || snapshot.Head.SHA != expectedHeadSHA {
-		return task.Task{}, review.Snapshot{}, fmt.Errorf("reviewed version changed: user reviewed %s...%s, current range is %s...%s", expectedBaseSHA, expectedHeadSHA, snapshot.Base.SHA, snapshot.Head.SHA)
-	}
 	snapshot, err := review.Prepare(s.Git, entry, all)
 	if err != nil {
 		return task.Task{}, review.Snapshot{}, err
+	}
+	if snapshot.Base.SHA != expectedBaseSHA || snapshot.Head.SHA != expectedHeadSHA {
+		return task.Task{}, review.Snapshot{}, fmt.Errorf("reviewed version changed: user reviewed %s...%s, current range is %s...%s", expectedBaseSHA, expectedHeadSHA, snapshot.Base.SHA, snapshot.Head.SHA)
+	}
+	if entry.Lifecycle != task.ReadyForReview {
+		return task.Task{}, review.Snapshot{}, fmt.Errorf("task %q must be marked ready for review before approval", id)
 	}
 	if snapshot.DependencyStatus != review.DependencyClear {
 		return task.Task{}, review.Snapshot{}, fmt.Errorf("cannot record final approval while dependency status is %s", snapshot.DependencyStatus)
@@ -347,13 +296,9 @@ func (s Service) Approve(id, expectedBaseSHA, expectedHeadSHA string) (task.Task
 	if snapshot.WorkingTree != "clean" {
 		return task.Task{}, review.Snapshot{}, fmt.Errorf("cannot record approval until the task worktree status is clean (current status: %s)", snapshot.WorkingTree)
 	}
-	entry.Lifecycle = task.Approved
 	entry.Review = task.Review{Status: task.ReviewApproved, ReviewedBaseSHA: snapshot.Base.SHA, ReviewedHeadSHA: snapshot.Head.SHA}
 	task.Touch(&entry)
 	if err := s.Ledger.Save(entry, "chore(arw): approve task "+id); err != nil {
-		return task.Task{}, review.Snapshot{}, err
-	}
-	if err := s.Ledger.SaveSnapshot(id, snapshot); err != nil {
 		return task.Task{}, review.Snapshot{}, err
 	}
 	return entry, snapshot, nil
@@ -368,26 +313,12 @@ func (s Service) RequestChanges(id, reason string) (task.Task, error) {
 		return task.Task{}, fmt.Errorf("cannot request changes for %s task", entry.Lifecycle)
 	}
 	entry.Lifecycle = task.Active
-	entry.Review.Status = task.ReviewChangesRequested
+	entry.Review = task.Review{Status: task.ReviewChangesRequested}
 	task.Touch(&entry)
 	if err := s.Ledger.Save(entry, "chore(arw): request changes for "+id+reasonSuffix(reason)); err != nil {
 		return task.Task{}, err
 	}
 	return entry, nil
-}
-func (s Service) OpenWorktree(id string) (string, error) {
-	entry, err := s.Ledger.Get(id)
-	if err != nil {
-		return "", err
-	}
-	path, err := worktree.Find(s.Git, entry.Branch)
-	if err != nil {
-		return "", err
-	}
-	if err := worktree.Open(path); err != nil {
-		return "", err
-	}
-	return path, nil
 }
 func (s Service) WorktreePath(id string) (string, error) {
 	entry, err := s.Ledger.Get(id)

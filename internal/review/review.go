@@ -11,11 +11,16 @@ import (
 
 type DependencyStatus string
 
+type ApprovalValidity string
+
 const (
 	DependencyClear      DependencyStatus = "clear"
 	AwaitingPrerequisite DependencyStatus = "awaiting_prerequisite_review"
 	ParentChanged        DependencyStatus = "parent_changed"
 	DependencyBlocked    DependencyStatus = "blocked"
+	ApprovalNotApproved  ApprovalValidity = "not_approved"
+	ApprovalCurrent      ApprovalValidity = "current"
+	ApprovalStale        ApprovalValidity = "stale"
 )
 
 type Revision struct {
@@ -33,18 +38,20 @@ type Commit struct {
 	Subject string `yaml:"subject" json:"subject"`
 }
 type Snapshot struct {
-	SchemaVersion    int                 `yaml:"schema_version" json:"schemaVersion"`
-	TaskID           string              `yaml:"task_id" json:"taskId"`
-	CreatedAt        string              `yaml:"created_at" json:"createdAt"`
-	Base             Revision            `yaml:"base" json:"base"`
-	Head             Revision            `yaml:"head" json:"head"`
-	Comparison       string              `yaml:"comparison" json:"comparison"`
-	Files            []File              `yaml:"files" json:"files"`
-	Commits          []Commit            `yaml:"commits" json:"commits"`
-	WorkingTree      string              `yaml:"working_tree" json:"workingTree"`
-	DependencyStatus DependencyStatus    `yaml:"dependency_status" json:"dependencyStatus"`
-	ReviewStatus     task.ReviewStatus   `yaml:"review_status" json:"reviewStatus"`
-	Risks            []string            `yaml:"risks" json:"risks"`
+	SchemaVersion    int               `yaml:"schema_version" json:"schemaVersion"`
+	TaskID           string            `yaml:"task_id" json:"taskId"`
+	CreatedAt        string            `yaml:"created_at" json:"createdAt"`
+	Base             Revision          `yaml:"base" json:"base"`
+	Head             Revision          `yaml:"head" json:"head"`
+	Comparison       string            `yaml:"comparison" json:"comparison"`
+	Files            []File            `yaml:"files" json:"files"`
+	Commits          []Commit          `yaml:"commits" json:"commits"`
+	WorkingTree      string            `yaml:"working_tree" json:"workingTree"`
+	Worktree         string            `yaml:"worktree" json:"worktree"`
+	DependencyStatus DependencyStatus  `yaml:"dependency_status" json:"dependencyStatus"`
+	ReviewStatus     task.ReviewStatus `yaml:"review_status" json:"reviewStatus"`
+	ApprovalValidity ApprovalValidity  `yaml:"approval_validity" json:"approvalValidity"`
+	Risks            []string          `yaml:"risks" json:"risks"`
 }
 
 func Prepare(git gitclient.Client, current task.Task, all []task.Task) (Snapshot, error) {
@@ -64,10 +71,12 @@ func Prepare(git gitclient.Client, current task.Task, all []task.Task) (Snapshot
 	if err != nil {
 		return Snapshot{}, err
 	}
+	worktree := ""
 	workingTree := "unknown"
-	if worktree, err := worktreeForBranch(git, current.Branch); err == nil && worktree != "" {
+	if path, err := worktreeForBranch(git, current.Branch); err == nil && path != "" {
+		worktree = path
 		probe := git
-		probe.Root = worktree
+		probe.Root = path
 		if output, err := probe.Run("-c", "core.fsmonitor=false", "status", "--porcelain", "--untracked-files=all"); err == nil {
 			if strings.TrimSpace(output) == "" {
 				workingTree = "clean"
@@ -76,7 +85,7 @@ func Prepare(git gitclient.Client, current task.Task, all []task.Task) (Snapshot
 			}
 		}
 	}
-	status := effectiveReviewStatus(current, base, head, dependency)
+	approvalValidity := approvalValidity(current, base, head, dependency)
 	risks := []string{}
 	if workingTree == "dirty" {
 		risks = append(risks, "Task worktree contains uncommitted changes; the committed review range does not include them.")
@@ -85,32 +94,24 @@ func Prepare(git gitclient.Client, current task.Task, all []task.Task) (Snapshot
 		risks = append(risks, "Task worktree status could not be determined; final approval is unavailable until it can be checked.")
 	}
 	if dependency == AwaitingPrerequisite {
-		risks = append(risks, "Parent task has not received final approval; this is a conditional review.")
+		risks = append(risks, "Parent task has not received final approval; this task cannot receive final approval yet.")
 	}
 	if dependency == ParentChanged {
 		risks = append(risks, "Parent task changed after this task's review context; review must be refreshed.")
 	}
-	if status == task.ReviewStale {
+	if approvalValidity == ApprovalStale {
 		risks = append(risks, "The prior review conclusion no longer matches this base and HEAD.")
 	}
-	return Snapshot{SchemaVersion: 1, TaskID: current.ID, CreatedAt: time.Now().Format(time.RFC3339), Base: Revision{Ref: baseRef, SHA: base}, Head: Revision{SHA: head}, Comparison: baseRef + "@" + base + "...HEAD@" + head, Files: files, Commits: commits, WorkingTree: workingTree, DependencyStatus: dependency, ReviewStatus: status, Risks: risks}, nil
-}
-
-func MarkPrepared(entry *task.Task, snapshot Snapshot) {
-	if entry.Lifecycle == task.Active || entry.Lifecycle == task.ReadyForReview {
-		entry.Lifecycle = task.InReview
-	}
-	if entry.Review.Status == task.ReviewApproved || entry.Review.Status == task.ReviewConditional {
-		if snapshot.ReviewStatus == task.ReviewStale {
-			entry.Review.Status = task.ReviewStale
-		}
-	}
-	task.Touch(entry)
+	return Snapshot{SchemaVersion: 1, TaskID: current.ID, CreatedAt: time.Now().Format(time.RFC3339), Base: Revision{Ref: baseRef, SHA: base}, Head: Revision{SHA: head}, Comparison: baseRef + "@" + base + "...HEAD@" + head, Files: files, Commits: commits, WorkingTree: workingTree, Worktree: worktree, DependencyStatus: dependency, ReviewStatus: current.Review.Status, ApprovalValidity: approvalValidity, Risks: risks}, nil
 }
 
 func comparisonBase(git gitclient.Client, current task.Task, all []task.Task) (string, string, DependencyStatus, error) {
 	if current.ParentTask == "" {
-		return current.Base.SHA, current.Base.Ref, DependencyClear, nil
+		base, err := git.Resolve(current.Base.Ref)
+		if err != nil {
+			return "", "", DependencyBlocked, fmt.Errorf("resolve recorded base %q: %w", current.Base.Ref, err)
+		}
+		return base, current.Base.Ref, DependencyClear, nil
 	}
 	parent, ok := find(all, current.ParentTask)
 	if !ok {
@@ -120,25 +121,27 @@ func comparisonBase(git gitclient.Client, current task.Task, all []task.Task) (s
 	if err != nil {
 		return "", "", DependencyBlocked, fmt.Errorf("resolve parent branch: %w", err)
 	}
-	if parent.Review.Status != task.ReviewApproved || parent.Review.ReviewedHeadSHA != parentHead {
+	parentBase, _, parentDependency, err := comparisonBase(git, parent, all)
+	if err != nil {
+		return "", "", DependencyBlocked, err
+	}
+	if approvalValidity(parent, parentBase, parentHead, parentDependency) != ApprovalCurrent {
 		return parentHead, parent.Branch, AwaitingPrerequisite, nil
 	}
-	if current.Review.Status == task.ReviewConditional && current.Review.ReviewedBaseSHA != "" && current.Review.ReviewedBaseSHA != parentHead {
+	if current.Review.Status == task.ReviewApproved && current.Review.ReviewedBaseSHA != "" && current.Review.ReviewedBaseSHA != parentHead {
 		return parentHead, parent.Branch, ParentChanged, nil
 	}
 	return parentHead, parent.Branch, DependencyClear, nil
 }
 
-func effectiveReviewStatus(current task.Task, base, head string, dependency DependencyStatus) task.ReviewStatus {
-	if current.Review.Status == task.ReviewApproved || current.Review.Status == task.ReviewConditional {
-		if current.Review.ReviewedBaseSHA != base || current.Review.ReviewedHeadSHA != head || dependency == ParentChanged {
-			return task.ReviewStale
-		}
+func approvalValidity(current task.Task, base, head string, dependency DependencyStatus) ApprovalValidity {
+	if current.Review.Status != task.ReviewApproved {
+		return ApprovalNotApproved
 	}
-	if dependency == AwaitingPrerequisite && current.Review.Status == task.ReviewApproved {
-		return task.ReviewConditional
+	if current.Review.ReviewedBaseSHA != base || current.Review.ReviewedHeadSHA != head || dependency != DependencyClear {
+		return ApprovalStale
 	}
-	return current.Review.Status
+	return ApprovalCurrent
 }
 
 func find(entries []task.Task, id string) (task.Task, bool) {

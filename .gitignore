@@ -10,6 +10,5 @@ vscode-extension/out/
 vscode-extension/*.vsix
 vscode-extension/node_modules/
 
-# Local ARW state and review artifacts
+# Local ARW state
 .git/arw/
-.agent-review/reviews/

@@ -2,7 +2,6 @@ package worktree
 
 import (
 	"fmt"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -40,18 +39,4 @@ func Find(git gitclient.Client, branch string) (string, error) {
 		}
 	}
 	return "", nil
-}
-
-func Open(path string) error {
-	if path == "" {
-		return fmt.Errorf("no local worktree is registered for this task")
-	}
-	if _, err := exec.LookPath("code"); err != nil {
-		return fmt.Errorf("VS Code command 'code' is not on PATH")
-	}
-	cmd := exec.Command("code", "--new-window", path)
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("open VS Code: %w", err)
-	}
-	return nil
 }

@@ -61,16 +61,16 @@
   for the current conversation until the user explicitly asks to use/start ARW.
   This only skips ARW bookkeeping; all Git safety rules still apply.
 - When `arw` and its typed `arw-mcp` tools are available and the user has chosen
-  ARW for a named task, read `workflow_context` before starting AI work.
+  ARW for a named task, read `workflow_get_task` before starting AI work. Use
+  `workflow_list_tasks` only when the task is not yet known.
 - Map a clear user intent such as “开始修复登录跳转” only to
   `workflow_start_task`; map review requests to `workflow_prepare_review`.
   Never pass arbitrary shell text to ARW.
-- For “在 VS Code 中审查 …”, prepare the review first, then use
-  `workflow_open_review` with a new window. Do not change the current VS Code
-  window's branch or worktree.
-- If a task depends on an unapproved parent, explain that reviewing it is
-  conditional and recommend reviewing the parent first. The user may still
-  choose to review the child.
+- For “在 VS Code 中审查 …”, prepare the review first, then return its worktree
+  path and exact base/head range. Do not change the current VS Code window's
+  branch or worktree; the user chooses the editor or Git UI.
+- If a task depends on an unapproved parent, explain that it may be inspected
+  but cannot receive final approval; recommend reviewing the parent first.
 - A user saying “搁置” or “恢复” is sufficient intent for the corresponding
   typed task operation. When the user explicitly says a named task “审查通过”,
   call `workflow_approve_task` with the exact base and HEAD from the snapshot the

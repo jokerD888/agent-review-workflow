@@ -3,23 +3,16 @@ package task
 import "testing"
 
 func TestValidateAcceptsMinimalTask(t *testing.T) {
-	entry := Task{SchemaVersion: SchemaVersion, ID: "fix-login", Title: "Fix login", Kind: "bugfix", Branch: "arw/fix-login", Base: Base{Ref: "main", SHA: "0123456789012345678901234567890123456789"}, Lifecycle: Active, Review: Review{Status: ReviewNone}}
+	entry := Task{SchemaVersion: SchemaVersion, ID: "fix-login", Title: "Fix login", Branch: "arw/fix-login", Base: Base{Ref: "main", SHA: "0123456789012345678901234567890123456789"}, Lifecycle: Active, Review: Review{Status: ReviewNone}}
 	if err := entry.Validate(); err != nil {
 		t.Fatalf("Validate() error = %v", err)
 	}
 }
 
 func TestValidateRejectsUnsafeBranch(t *testing.T) {
-	entry := Task{SchemaVersion: SchemaVersion, ID: "fix-login", Title: "Fix login", Kind: "bugfix", Branch: "arw/another-task", Base: Base{Ref: "main", SHA: "0123456789012345678901234567890123456789"}, Lifecycle: Active, Review: Review{Status: ReviewNone}}
+	entry := Task{SchemaVersion: SchemaVersion, ID: "fix-login", Title: "Fix login", Branch: "arw/another-task", Base: Base{Ref: "main", SHA: "0123456789012345678901234567890123456789"}, Lifecycle: Active, Review: Review{Status: ReviewNone}}
 	if err := entry.Validate(); err == nil {
 		t.Fatal("Validate() accepted a branch for another task")
-	}
-}
-
-func TestValidateRejectsUnsupportedKind(t *testing.T) {
-	entry := Task{SchemaVersion: SchemaVersion, ID: "fix-login", Title: "Fix login", Kind: "urgent", Branch: "arw/fix-login", Base: Base{Ref: "main", SHA: "0123456789012345678901234567890123456789"}, Lifecycle: Active, Review: Review{Status: ReviewNone}}
-	if err := entry.Validate(); err == nil {
-		t.Fatal("Validate() accepted an unsupported kind")
 	}
 }
 

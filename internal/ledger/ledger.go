@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
 	gitclient "github.com/jokerD888/agent-review-workflow/internal/git"
 	"github.com/jokerD888/agent-review-workflow/internal/task"
@@ -97,18 +96,6 @@ func (s Store) Save(entry task.Task, message string) error {
 		return err
 	}
 	return s.commitFile(taskPath(entry.ID), string(data), message)
-}
-
-func (s Store) SaveSnapshot(id string, snapshot any) error {
-	if err := s.Setup(); err != nil {
-		return err
-	}
-	data, err := yaml.Marshal(snapshot)
-	if err != nil {
-		return err
-	}
-	name := time.Now().UTC().Format("20060102T150405.000000000Z") + ".yaml"
-	return s.commitFile(filepath.ToSlash(filepath.Join(".agent-review", "reviews", id, name)), string(data), "chore(arw): snapshot review "+id)
 }
 
 func (s Store) commitFile(path, contents, message string) error {

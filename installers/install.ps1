@@ -81,7 +81,7 @@ function Set-AgentMcpConfig([string]$RulesPath) {
             if ($config.mcp.ContainsKey('servers')) {
                 $servers = $config.mcp.servers
                 if ($servers -isnot [System.Collections.IDictionary] -or @($servers.Keys | Where-Object { $_ -ne 'arw' }).Count -ne 0) {
-                    throw 'Refusing to remove unrelated mcp.servers entries for OpenCode v1; migrate them manually.'
+                    throw 'Refusing to remove unrelated mcp.servers entries for legacy OpenCode configuration; migrate them manually.'
                 }
                 $config.mcp.Remove('servers')
             }

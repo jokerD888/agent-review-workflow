@@ -122,19 +122,27 @@ func execute(call toolCall) (any, error) {
 		return nil, err
 	}
 	switch call.Name {
-	case "workflow_context":
-		entries, err := svc.Tasks()
-		if err != nil {
-			return nil, err
-		}
-		return map[string]any{"repository": svc.Git.Root, "tasks": entries}, nil
 	case "workflow_list_tasks":
 		entries, err := svc.Tasks()
 		if err != nil {
 			return nil, err
 		}
 		filter, _ := args["filter"].(string)
-		return filterTasks(entries, filter), nil
+		return map[string]any{"repository": svc.Git.Root, "tasks": filterTasks(entries, filter)}, nil
+	case "workflow_get_task":
+		id, err := requiredString(args, "task_id")
+		if err != nil {
+			return nil, err
+		}
+		entry, err := svc.Task(id)
+		if err != nil {
+			return nil, err
+		}
+		path, err := svc.WorktreePath(id)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"task": entry, "worktree": path}, nil
 	case "workflow_start_task":
 		title, ok := args["title"].(string)
 		if !ok || strings.TrimSpace(title) == "" {
@@ -142,32 +150,13 @@ func execute(call toolCall) (any, error) {
 		}
 		parent, _ := args["parent_task"].(string)
 		id, _ := args["id"].(string)
-		kind, _ := args["kind"].(string)
-		return svc.Start(app.StartOptions{Title: title, ParentTask: parent, ID: id, Kind: kind})
+		return svc.Start(app.StartOptions{Title: title, ParentTask: parent, ID: id})
 	case "workflow_prepare_review":
 		id, err := requiredString(args, "task_id")
 		if err != nil {
 			return nil, err
 		}
 		return svc.PrepareReview(id)
-	case "workflow_open_review":
-		id, err := requiredString(args, "task_id")
-		if err != nil {
-			return nil, err
-		}
-		newWindow, _ := args["new_window"].(bool)
-		if !newWindow {
-			path, err := svc.WorktreePath(id)
-			if err != nil {
-				return nil, err
-			}
-			return map[string]any{"taskId": id, "worktree": path, "opened": false}, nil
-		}
-		path, err := svc.OpenWorktree(id)
-		if err != nil {
-			return nil, err
-		}
-		return map[string]any{"taskId": id, "worktree": path, "opened": true}, nil
 	case "workflow_park_task":
 		id, err := requiredString(args, "task_id")
 		if err != nil {
@@ -223,15 +212,6 @@ func execute(call toolCall) (any, error) {
 			return nil, fmt.Errorf("confirm must be true after the user explicitly requests a local merge")
 		}
 		return svc.Merge(id)
-	case "workflow_mark_merged":
-		id, err := requiredString(args, "task_id")
-		if err != nil {
-			return nil, err
-		}
-		if confirmed, _ := args["confirm"].(bool); !confirmed {
-			return nil, fmt.Errorf("confirm must be true before recording a merge")
-		}
-		return svc.MarkMerged(id)
 	case "workflow_abandon_task":
 		id, err := requiredString(args, "task_id")
 		if err != nil {
@@ -241,12 +221,6 @@ func execute(call toolCall) (any, error) {
 			return nil, fmt.Errorf("confirm must be true before abandoning a task")
 		}
 		return svc.Abandon(id)
-	case "workflow_refresh":
-		entries, err := svc.Tasks()
-		if err != nil {
-			return nil, err
-		}
-		return map[string]any{"repository": svc.Git.Root, "tasks": len(entries)}, nil
 	default:
 		return nil, fmt.Errorf("tool %q is not exposed", call.Name)
 	}
@@ -265,7 +239,7 @@ func filterTasks(entries []task.Task, filter string) []task.Task {
 	}
 	result := []task.Task{}
 	for _, entry := range entries {
-		if filter == "active" && (entry.Lifecycle == task.Active || entry.Lifecycle == task.InReview || entry.Lifecycle == task.ReadyForReview) || filter == "parked" && entry.Lifecycle == task.Parked || filter == "reviewable" && (entry.Lifecycle == task.ReadyForReview || entry.Lifecycle == task.InReview || entry.Lifecycle == task.Approved) || filter == "blocked" && entry.ParentTask != "" && entry.Review.Status != task.ReviewApproved {
+		if filter == "active" && (entry.Lifecycle == task.Active || entry.Lifecycle == task.ReadyForReview) || filter == "parked" && entry.Lifecycle == task.Parked || filter == "reviewable" && entry.Lifecycle == task.ReadyForReview || filter == "blocked" && entry.ParentTask != "" && entry.Review.Status != task.ReviewApproved {
 			result = append(result, entry)
 		}
 	}
@@ -282,19 +256,16 @@ func definitions() []map[string]any {
 		return properties
 	}
 	return []map[string]any{
-		{"name": "workflow_context", "description": "Read the current repository and known ARW tasks before taking task actions.", "inputSchema": map[string]any{"type": "object", "properties": cwd}},
 		{"name": "workflow_list_tasks", "description": "List tasks tracked by ARW. This is read-only.", "inputSchema": map[string]any{"type": "object", "properties": map[string]any{"filter": map[string]any{"type": "string", "enum": []string{"active", "reviewable", "parked", "blocked"}}, "cwd": cwd["cwd"]}}},
-		{"name": "workflow_start_task", "description": "Create a task branch, task worktree, and ledger record. Does not touch protected branches or remotes.", "inputSchema": map[string]any{"type": "object", "required": []string{"title"}, "properties": map[string]any{"title": map[string]any{"type": "string"}, "id": map[string]any{"type": "string"}, "kind": map[string]any{"type": "string"}, "parent_task": map[string]any{"type": "string"}, "cwd": cwd["cwd"]}}},
+		{"name": "workflow_get_task", "description": "Read one task and its local worktree path. This is read-only.", "inputSchema": map[string]any{"type": "object", "required": []string{"task_id"}, "properties": withTask(nil)}},
+		{"name": "workflow_start_task", "description": "Create a task branch, task worktree, and ledger record. Does not touch protected branches or remotes.", "inputSchema": map[string]any{"type": "object", "required": []string{"title"}, "properties": map[string]any{"title": map[string]any{"type": "string"}, "id": map[string]any{"type": "string"}, "parent_task": map[string]any{"type": "string"}, "cwd": cwd["cwd"]}}},
 		{"name": "workflow_prepare_review", "description": "Create a review snapshot using the task's recorded base or parent task. Read-only with respect to source code.", "inputSchema": map[string]any{"type": "object", "required": []string{"task_id"}, "properties": withTask(nil)}},
-		{"name": "workflow_open_review", "description": "Locate a task worktree; set new_window true only when the user explicitly asks to open VS Code.", "inputSchema": map[string]any{"type": "object", "required": []string{"task_id"}, "properties": withTask(map[string]any{"new_window": map[string]any{"type": "boolean"}})}},
 		{"name": "workflow_park_task", "description": "Park a task while preserving its branch, worktree, and review history.", "inputSchema": map[string]any{"type": "object", "required": []string{"task_id"}, "properties": withTask(nil)}},
 		{"name": "workflow_resume_task", "description": "Resume a parked task.", "inputSchema": map[string]any{"type": "object", "required": []string{"task_id"}, "properties": withTask(nil)}},
 		{"name": "workflow_mark_ready", "description": "Record that a task is ready for review. This does not merge, push, or modify source code.", "inputSchema": map[string]any{"type": "object", "required": []string{"task_id"}, "properties": withTask(nil)}},
 		{"name": "workflow_approve_task", "description": "Record the user's explicit approval for the exact base and HEAD they reviewed. Never call from the agent's own judgment or substitute newer SHAs.", "inputSchema": map[string]any{"type": "object", "required": []string{"task_id", "expected_base_sha", "expected_head_sha", "confirm"}, "properties": withTask(map[string]any{"expected_base_sha": map[string]any{"type": "string", "pattern": "^[0-9a-f]{40}$"}, "expected_head_sha": map[string]any{"type": "string", "pattern": "^[0-9a-f]{40}$"}, "confirm": map[string]any{"type": "boolean"}})}},
 		{"name": "workflow_request_changes", "description": "Record the user's review conclusion that the task needs changes.", "inputSchema": map[string]any{"type": "object", "required": []string{"task_id"}, "properties": withTask(map[string]any{"reason": map[string]any{"type": "string"}})}},
 		{"name": "workflow_merge_task", "description": "After the user explicitly requests it, fast-forward an approved task into its recorded parent/base branch. Never pushes or resolves conflicts.", "inputSchema": map[string]any{"type": "object", "required": []string{"task_id", "confirm"}, "properties": withTask(map[string]any{"confirm": map[string]any{"type": "boolean"}})}},
-		{"name": "workflow_mark_merged", "description": "Record a completed merge after the user confirms it occurred. This never performs a merge or remote action.", "inputSchema": map[string]any{"type": "object", "required": []string{"task_id", "confirm"}, "properties": withTask(map[string]any{"confirm": map[string]any{"type": "boolean"}})}},
 		{"name": "workflow_abandon_task", "description": "Record that a task was abandoned after the user confirms it. This retains its branch and worktree.", "inputSchema": map[string]any{"type": "object", "required": []string{"task_id", "confirm"}, "properties": withTask(map[string]any{"confirm": map[string]any{"type": "boolean"}})}},
-		{"name": "workflow_refresh", "description": "Refresh local task context without modifying Git history.", "inputSchema": map[string]any{"type": "object", "properties": cwd}},
 	}
 }

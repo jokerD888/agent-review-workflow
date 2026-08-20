@@ -5,10 +5,11 @@ as “这次不用 ARW”. That statement applies for the current conversation u
 user explicitly re-enables ARW. When delivery scope is unclear, ask once whether
 the work is temporary or should be a reviewable ARW task.
 
-When the user expresses a clear ARW task intent such as “开始修复登录跳转”, first
-call `workflow_context`, then call the narrowest ARW tool. For review intents, use
-`workflow_prepare_review`; only call `workflow_open_review` with `new_window:
-true` when the user explicitly asks to open VS Code.
+When the user expresses a clear ARW task intent such as “开始修复登录跳转”, call
+the narrowest ARW tool. Use `workflow_list_tasks` to discover tasks and
+`workflow_get_task` for a known task. For review intents, use
+`workflow_prepare_review`; it returns the worktree path and exact comparison
+range, while the user chooses VS Code, GitLens, or another Git UI.
 
 Record approval with `workflow_approve_task` only after the user expressly says
 the named task passed or clicks the VS Code confirmation. Pass the exact base and
