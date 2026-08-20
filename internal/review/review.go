@@ -42,7 +42,6 @@ type Snapshot struct {
 	Files            []File              `yaml:"files" json:"files"`
 	Commits          []Commit            `yaml:"commits" json:"commits"`
 	WorkingTree      string              `yaml:"working_tree" json:"workingTree"`
-	Tests            []task.TestEvidence `yaml:"tests" json:"tests"`
 	DependencyStatus DependencyStatus    `yaml:"dependency_status" json:"dependencyStatus"`
 	ReviewStatus     task.ReviewStatus   `yaml:"review_status" json:"reviewStatus"`
 	Risks            []string            `yaml:"risks" json:"risks"`
@@ -94,7 +93,7 @@ func Prepare(git gitclient.Client, current task.Task, all []task.Task) (Snapshot
 	if status == task.ReviewStale {
 		risks = append(risks, "The prior review conclusion no longer matches this base and HEAD.")
 	}
-	return Snapshot{SchemaVersion: 1, TaskID: current.ID, CreatedAt: time.Now().Format(time.RFC3339), Base: Revision{Ref: baseRef, SHA: base}, Head: Revision{SHA: head}, Comparison: baseRef + "@" + base + "...HEAD@" + head, Files: files, Commits: commits, WorkingTree: workingTree, Tests: current.Tests, DependencyStatus: dependency, ReviewStatus: status, Risks: risks}, nil
+	return Snapshot{SchemaVersion: 1, TaskID: current.ID, CreatedAt: time.Now().Format(time.RFC3339), Base: Revision{Ref: baseRef, SHA: base}, Head: Revision{SHA: head}, Comparison: baseRef + "@" + base + "...HEAD@" + head, Files: files, Commits: commits, WorkingTree: workingTree, DependencyStatus: dependency, ReviewStatus: status, Risks: risks}, nil
 }
 
 func MarkPrepared(entry *task.Task, snapshot Snapshot) {

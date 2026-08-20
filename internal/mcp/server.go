@@ -186,31 +186,43 @@ func execute(call toolCall) (any, error) {
 			return nil, err
 		}
 		return svc.MarkReady(id)
-	case "workflow_record_test":
+	case "workflow_approve_task":
 		id, err := requiredString(args, "task_id")
 		if err != nil {
 			return nil, err
 		}
-		command, err := requiredString(args, "command")
+		if confirmed, _ := args["confirm"].(bool); !confirmed {
+			return nil, fmt.Errorf("confirm must be true after the user explicitly approves the reviewed task")
+		}
+		expectedBase, err := requiredString(args, "expected_base_sha")
 		if err != nil {
 			return nil, err
 		}
-		result, err := requiredString(args, "result")
+		expectedHead, err := requiredString(args, "expected_head_sha")
 		if err != nil {
 			return nil, err
 		}
-		evidence := task.TestEvidence{Command: command, Result: result}
-		if summary, ok := args["summary"].(string); ok {
-			evidence.Summary = summary
+		entry, snapshot, err := svc.Approve(id, expectedBase, expectedHead)
+		if err != nil {
+			return nil, err
 		}
-		if code, ok := args["exit_code"].(float64); ok {
-			if code != float64(int(code)) {
-				return nil, fmt.Errorf("exit_code must be an integer")
-			}
-			value := int(code)
-			evidence.ExitCode = &value
+		return map[string]any{"task": entry, "snapshot": snapshot}, nil
+	case "workflow_request_changes":
+		id, err := requiredString(args, "task_id")
+		if err != nil {
+			return nil, err
 		}
-		return svc.RecordTest(id, evidence)
+		reason, _ := args["reason"].(string)
+		return svc.RequestChanges(id, reason)
+	case "workflow_merge_task":
+		id, err := requiredString(args, "task_id")
+		if err != nil {
+			return nil, err
+		}
+		if confirmed, _ := args["confirm"].(bool); !confirmed {
+			return nil, fmt.Errorf("confirm must be true after the user explicitly requests a local merge")
+		}
+		return svc.Merge(id)
 	case "workflow_mark_merged":
 		id, err := requiredString(args, "task_id")
 		if err != nil {
@@ -278,7 +290,9 @@ func definitions() []map[string]any {
 		{"name": "workflow_park_task", "description": "Park a task while preserving its branch, worktree, and review history.", "inputSchema": map[string]any{"type": "object", "required": []string{"task_id"}, "properties": withTask(nil)}},
 		{"name": "workflow_resume_task", "description": "Resume a parked task.", "inputSchema": map[string]any{"type": "object", "required": []string{"task_id"}, "properties": withTask(nil)}},
 		{"name": "workflow_mark_ready", "description": "Record that a task is ready for review. This does not merge, push, or modify source code.", "inputSchema": map[string]any{"type": "object", "required": []string{"task_id"}, "properties": withTask(nil)}},
-		{"name": "workflow_record_test", "description": "Record existing test evidence only; this tool never executes the command.", "inputSchema": map[string]any{"type": "object", "required": []string{"task_id", "command", "result"}, "properties": withTask(map[string]any{"command": map[string]any{"type": "string"}, "result": map[string]any{"type": "string", "enum": []string{"passed", "failed", "skipped", "unknown"}}, "exit_code": map[string]any{"type": "integer"}, "summary": map[string]any{"type": "string"}})}},
+		{"name": "workflow_approve_task", "description": "Record the user's explicit approval for the exact base and HEAD they reviewed. Never call from the agent's own judgment or substitute newer SHAs.", "inputSchema": map[string]any{"type": "object", "required": []string{"task_id", "expected_base_sha", "expected_head_sha", "confirm"}, "properties": withTask(map[string]any{"expected_base_sha": map[string]any{"type": "string", "pattern": "^[0-9a-f]{40}$"}, "expected_head_sha": map[string]any{"type": "string", "pattern": "^[0-9a-f]{40}$"}, "confirm": map[string]any{"type": "boolean"}})}},
+		{"name": "workflow_request_changes", "description": "Record the user's review conclusion that the task needs changes.", "inputSchema": map[string]any{"type": "object", "required": []string{"task_id"}, "properties": withTask(map[string]any{"reason": map[string]any{"type": "string"}})}},
+		{"name": "workflow_merge_task", "description": "After the user explicitly requests it, fast-forward an approved task into its recorded parent/base branch. Never pushes or resolves conflicts.", "inputSchema": map[string]any{"type": "object", "required": []string{"task_id", "confirm"}, "properties": withTask(map[string]any{"confirm": map[string]any{"type": "boolean"}})}},
 		{"name": "workflow_mark_merged", "description": "Record a completed merge after the user confirms it occurred. This never performs a merge or remote action.", "inputSchema": map[string]any{"type": "object", "required": []string{"task_id", "confirm"}, "properties": withTask(map[string]any{"confirm": map[string]any{"type": "boolean"}})}},
 		{"name": "workflow_abandon_task", "description": "Record that a task was abandoned after the user confirms it. This retains its branch and worktree.", "inputSchema": map[string]any{"type": "object", "required": []string{"task_id", "confirm"}, "properties": withTask(map[string]any{"confirm": map[string]any{"type": "boolean"}})}},
 		{"name": "workflow_refresh", "description": "Refresh local task context without modifying Git history.", "inputSchema": map[string]any{"type": "object", "properties": cwd}},

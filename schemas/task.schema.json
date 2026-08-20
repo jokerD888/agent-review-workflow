@@ -4,7 +4,7 @@
   "title": "ARW Task",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "id", "title", "kind", "branch", "base", "lifecycle", "review", "dependencies", "tests", "created_at", "updated_at"],
+  "required": ["schema_version", "id", "title", "kind", "branch", "base", "lifecycle", "review", "dependencies", "created_at", "updated_at"],
   "properties": {
     "schema_version": { "const": 1 },
     "id": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
@@ -33,22 +33,7 @@
       }
     },
     "dependencies": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
-    "tests": { "type": "array", "items": { "$ref": "#/$defs/testEvidence" } },
     "created_at": { "type": "string", "format": "date-time" },
     "updated_at": { "type": "string", "format": "date-time" }
-  },
-  "$defs": {
-    "testEvidence": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["command", "result"],
-      "properties": {
-        "command": { "type": "string", "minLength": 1 },
-        "result": { "type": "string", "enum": ["passed", "failed", "skipped", "unknown"] },
-        "exit_code": { "type": "integer" },
-        "summary": { "type": "string" },
-        "recorded_at": { "type": "string", "format": "date-time" }
-      }
-    }
   }
 }

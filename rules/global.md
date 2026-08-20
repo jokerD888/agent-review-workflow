@@ -41,8 +41,10 @@
 
 - Do not interrupt the user for review after every small edit.
 - Expect the user to review the accumulated task-branch diff before merge.
-- The user retains final approval for merge, push, release, credential changes,
-  destructive operations, and externally visible changes.
+- The user retains final decision authority for approval, merge, push, release,
+  credential changes, destructive operations, and externally visible changes.
+  The agent may carry out an approved local action only after that intent is
+  explicit; decision authority does not require the user to operate the CLI.
 
 ## ARW v2 task workflow
 
@@ -70,5 +72,13 @@
   conditional and recommend reviewing the parent first. The user may still
   choose to review the child.
 - A user saying “搁置” or “恢复” is sufficient intent for the corresponding
-  typed task operation. A user saying “审查通过” must be treated as a human
-  conclusion only; it never authorizes merge or push.
+  typed task operation. When the user explicitly says a named task “审查通过”,
+  call `workflow_approve_task` with the exact base and HEAD from the snapshot the
+  user reviewed; never substitute a newer snapshot or infer approval from the
+  agent's own implementation or review. “审查完毕” without a result is ambiguous,
+  so ask whether it passed or needs changes. If the user explicitly requests
+  changes, call `workflow_request_changes` and preserve the user's reason.
+- Approval does not itself authorize merge or push. When the user separately
+  asks to merge an approved task, call `workflow_merge_task`; it may only perform
+  the tool's local fast-forward merge. Never treat merge permission as push
+  permission, and never resolve a merge conflict without a new explicit request.

@@ -36,21 +36,25 @@ once whether this is temporary work or a reviewable ARW task. Say “开始 ARW�
 
 For a review, run `arw review prepare <task-id>`. It returns the exact recorded
 base and task HEAD, commits, changed files, dirty-worktree status, dependency
-state, test evidence, and risks. A child task is conditionally reviewable until
-its parent has final approval. `arw review approve --confirm <task-id>` records
-a human conclusion only; it cannot merge or push.
+state, and risks. A child task is conditionally reviewable until
+its parent has final approval. After the user explicitly says the task passed,
+a configured agent can call `workflow_approve_task`; this records the user's
+conclusion for the exact base and HEAD they reviewed, not the agent's own
+judgment. If either SHA has changed, approval is refused.
 
-Record test evidence without executing arbitrary commands with `arw task
-record-test --command "go test ./..." --result passed <task-id>`. Use `arw task
-ready <task-id>` when implementation is ready to review. After a human-approved
-task is merged outside ARW, record that fact with `arw task mark-merged --confirm
-<task-id>`; `arw task abandon --confirm <task-id>` records an abandoned task
-without deleting its branch or worktree.
+Use `arw task ready <task-id>` when implementation is ready to review. A separate
+explicit user request can call `workflow_merge_task` or `arw task merge
+--confirm <task-id>` to fast-forward the approved task into its recorded
+parent/base branch. It refuses moved targets, dirty worktrees, non-fast-forward
+integration, and conflicts; it never pushes. `arw task mark-merged --confirm`
+remains available to record a merge completed outside ARW, while `arw task
+abandon --confirm` records an abandoned task without deleting its branch or
+worktree.
 
-The TypeScript extension is in `vscode-extension/`. Run `npm ci && npm run
-package` there, then install the generated VSIX. It displays the task tree and
-opens immutable Git-SHA-to-Git-SHA native VS Code diffs, so the visible diff is
-not accidentally based on whichever branch is currently open.
+ARW does not provide a custom editor extension. Use VS Code Source Control to
+inspect the task branch and its recorded base; use GitLens when you need an
+arbitrary-ref comparison. ARW's responsibility is to return and validate the
+exact base/head SHA pair, not to replace mature Git diff interfaces.
 
 ## What this installs
 
@@ -99,19 +103,19 @@ new terminal after installation, then run `arw help`.
 ## v2 release installation
 
 Install only versioned Release assets (never a mutable `main` script). The
-installers download the matching binary, verify `checksums.txt`, add its
-user-local `bin` directory to PATH, and can install the VSIX. Each release also
-has GitHub build provenance attached by the release workflow; installers verify
-the checksum manifest but do not currently verify attestations locally:
+installers download the matching binaries, verify `checksums.txt`, and add their
+user-local `bin` directory to PATH. Each release also has GitHub build
+provenance attached by the release workflow; installers verify the checksum
+manifest but do not currently verify attestations locally:
 
 ```powershell
 irm https://raw.githubusercontent.com/jokerD888/agent-review-workflow/main/installers/install.ps1 -OutFile install-arw.ps1
-.\install-arw.ps1 -InstallExtension -ConfigureAgents
+.\install-arw.ps1 -ConfigureAgents
 ```
 
 ```bash
 curl -fsSLO https://raw.githubusercontent.com/jokerD888/agent-review-workflow/main/installers/install.sh
-sh install.sh --with-extension --configure-agents
+sh install.sh --configure-agents
 ```
 
 Use `--version vX.Y.Z` to pin a release; use `--force` only to replace an
@@ -198,7 +202,6 @@ cmd/arw/                         v2 Go CLI
 cmd/arw-mcp/                     v2 stdio MCP server
 internal/                        v2 Git, ledger, task, review, worktree logic
 schemas/                         JSON contracts for tasks and review snapshots
-vscode-extension/                v2 VS Code task and diff UI
 integrations/                    Natural-language rules for each supported agent
 ```
 

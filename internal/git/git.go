@@ -35,7 +35,7 @@ func (c Client) RequireClean() error {
 		return err
 	}
 	if strings.TrimSpace(output) != "" {
-		return fmt.Errorf("working tree is not clean; commit, stash, or explicitly resolve it before creating a task")
+		return fmt.Errorf("working tree is not clean; commit, stash, or explicitly resolve the changes first")
 	}
 	return nil
 }

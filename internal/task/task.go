@@ -30,14 +30,6 @@ const (
 	ReviewStale            ReviewStatus = "stale"
 )
 
-type TestEvidence struct {
-	Command    string `yaml:"command" json:"command"`
-	Result     string `yaml:"result" json:"result"`
-	ExitCode   *int   `yaml:"exit_code,omitempty" json:"exitCode,omitempty"`
-	Summary    string `yaml:"summary,omitempty" json:"summary,omitempty"`
-	RecordedAt string `yaml:"recorded_at,omitempty" json:"recordedAt,omitempty"`
-}
-
 type Base struct {
 	Ref string `yaml:"ref" json:"ref"`
 	SHA string `yaml:"sha" json:"sha"`
@@ -60,7 +52,6 @@ type Task struct {
 	Lifecycle     Lifecycle      `yaml:"lifecycle" json:"lifecycle"`
 	Review        Review         `yaml:"review" json:"review"`
 	Dependencies  []string       `yaml:"dependencies" json:"dependencies"`
-	Tests         []TestEvidence `yaml:"tests" json:"tests"`
 	CreatedAt     string         `yaml:"created_at" json:"createdAt"`
 	UpdatedAt     string         `yaml:"updated_at" json:"updatedAt"`
 }
@@ -93,23 +84,7 @@ func (t Task) Validate() error {
 	if !validReview(t.Review.Status) {
 		return fmt.Errorf("invalid review status %q", t.Review.Status)
 	}
-	for index, evidence := range t.Tests {
-		if err := evidence.Validate(); err != nil {
-			return fmt.Errorf("test evidence %d: %w", index, err)
-		}
-	}
 	return nil
-}
-
-func (e TestEvidence) Validate() error {
-	if strings.TrimSpace(e.Command) == "" {
-		return fmt.Errorf("test command is required")
-	}
-	switch e.Result {
-	case "passed", "failed", "skipped", "unknown":
-		return nil
-	}
-	return fmt.Errorf("invalid test result %q", e.Result)
 }
 
 func ValidID(id string) bool {

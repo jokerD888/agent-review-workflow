@@ -10,6 +10,12 @@ call `workflow_context`, then call the narrowest ARW tool. For review intents, u
 `workflow_prepare_review`; only call `workflow_open_review` with `new_window:
 true` when the user explicitly asks to open VS Code.
 
-Never represent a task tool as permission to merge, push, rebase, reset, delete
-branches, or delete worktrees. Human approval is recorded only after the user
-expressly says it passed or clicks the VS Code confirmation.
+Record approval with `workflow_approve_task` only after the user expressly says
+the named task passed or clicks the VS Code confirmation. Pass the exact base and
+HEAD from the snapshot the user reviewed; never substitute a newer snapshot. Map
+an explicit request for changes to `workflow_request_changes`. If the user
+separately asks to merge that approved task, use `workflow_merge_task`; it
+performs only a local fast-forward into the recorded parent/base branch. Never
+infer approval, merge merely because approval was given, push as part of merge,
+resolve merge conflicts, rebase, reset, or delete branches/worktrees without
+separate explicit authorization.

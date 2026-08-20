@@ -35,6 +35,13 @@ type StartResult struct {
 	Worktree string    `json:"worktree"`
 }
 
+type MergeResult struct {
+	Task         task.Task `json:"task"`
+	SourceBranch string    `json:"sourceBranch"`
+	TargetBranch string    `json:"targetBranch"`
+	HeadSHA      string    `json:"headSHA"`
+}
+
 func (s Service) Setup() error { return s.Ledger.Setup() }
 
 func (s Service) Start(options StartOptions) (StartResult, error) {
@@ -94,7 +101,7 @@ func (s Service) Start(options StartOptions) (StartResult, error) {
 		return StartResult{}, err
 	}
 	now := time.Now().Format(time.RFC3339)
-	entry := task.Task{SchemaVersion: task.SchemaVersion, ID: id, Title: options.Title, Kind: options.Kind, Branch: branch, Base: task.Base{Ref: baseRef, SHA: baseSHA}, ParentTask: parent, Lifecycle: task.Active, Review: task.Review{Status: task.ReviewNone}, Dependencies: dependencies, Tests: []task.TestEvidence{}, CreatedAt: now, UpdatedAt: now}
+	entry := task.Task{SchemaVersion: task.SchemaVersion, ID: id, Title: options.Title, Kind: options.Kind, Branch: branch, Base: task.Base{Ref: baseRef, SHA: baseSHA}, ParentTask: parent, Lifecycle: task.Active, Review: task.Review{Status: task.ReviewNone}, Dependencies: dependencies, CreatedAt: now, UpdatedAt: now}
 	if err := s.Ledger.Save(entry, "chore(arw): create task "+id); err != nil {
 		return StartResult{}, fmt.Errorf("task worktree was created, but saving its registry record failed: %w", err)
 	}
@@ -167,6 +174,100 @@ func (s Service) MarkMerged(id string) (task.Task, error) {
 	return entry, nil
 }
 
+// Merge fast-forwards an approved task into its recorded parent/base branch.
+// The target is derived from task metadata so an agent cannot choose an
+// arbitrary branch. A non-fast-forward merge is refused because it would
+// create an integration result that was not part of the approved snapshot.
+func (s Service) Merge(id string) (MergeResult, error) {
+	entry, err := s.Ledger.Get(id)
+	if err != nil {
+		return MergeResult{}, err
+	}
+	if entry.Lifecycle != task.Approved || entry.Review.Status != task.ReviewApproved {
+		return MergeResult{}, fmt.Errorf("task %q must have current human approval before merge", id)
+	}
+	all, err := s.Ledger.List()
+	if err != nil {
+		return MergeResult{}, err
+	}
+	snapshot, err := review.Prepare(s.Git, entry, all)
+	if err != nil {
+		return MergeResult{}, err
+	}
+	if snapshot.ReviewStatus != task.ReviewApproved || snapshot.DependencyStatus != review.DependencyClear {
+		return MergeResult{}, fmt.Errorf("task %q approval is no longer current; prepare and complete review again", id)
+	}
+	if snapshot.WorkingTree != "clean" {
+		return MergeResult{}, fmt.Errorf("cannot merge until the task worktree is clean (current status: %s)", snapshot.WorkingTree)
+	}
+	targetBranch, err := s.mergeTarget(entry)
+	if err != nil {
+		return MergeResult{}, err
+	}
+	targetHead, err := s.Git.Resolve(targetBranch)
+	if err != nil {
+		return MergeResult{}, err
+	}
+	if targetHead != entry.Review.ReviewedBaseSHA {
+		return MergeResult{}, fmt.Errorf("target branch %q moved from reviewed base %s to %s; update the task and review again", targetBranch, entry.Review.ReviewedBaseSHA, targetHead)
+	}
+	targetPath, err := worktree.Find(s.Git, targetBranch)
+	if err != nil {
+		return MergeResult{}, err
+	}
+	if targetPath == "" {
+		return MergeResult{}, fmt.Errorf("target branch %q has no local worktree; merge was not attempted", targetBranch)
+	}
+	targetGit := gitclient.Client{Root: targetPath}
+	if err := targetGit.RequireClean(); err != nil {
+		return MergeResult{}, fmt.Errorf("target worktree is not clean: %w", err)
+	}
+	if _, err := targetGit.Run("merge", "--ff-only", entry.Branch); err != nil {
+		return MergeResult{}, fmt.Errorf("fast-forward task %q into %q: %w", id, targetBranch, err)
+	}
+	mergedHead, err := targetGit.Resolve(targetBranch)
+	if err != nil {
+		return MergeResult{}, fmt.Errorf("verify merged target: %w", err)
+	}
+	if mergedHead != snapshot.Head.SHA {
+		return MergeResult{}, fmt.Errorf("target %q ended at %s instead of approved head %s", targetBranch, mergedHead, snapshot.Head.SHA)
+	}
+	entry.Lifecycle = task.Merged
+	task.Touch(&entry)
+	if err := s.Ledger.Save(entry, "chore(arw): merge task "+id+" into "+targetBranch); err != nil {
+		return MergeResult{}, fmt.Errorf("task was merged into %q, but updating the registry failed: %w", targetBranch, err)
+	}
+	if entry.ParentTask != "" {
+		parent, err := s.Ledger.Get(entry.ParentTask)
+		if err != nil {
+			return MergeResult{}, fmt.Errorf("task was merged, but reloading parent task %q failed: %w", entry.ParentTask, err)
+		}
+		if parent.Review.Status == task.ReviewApproved || parent.Review.Status == task.ReviewConditional {
+			parent.Lifecycle = task.ReadyForReview
+			parent.Review.Status = task.ReviewStale
+			task.Touch(&parent)
+			if err := s.Ledger.Save(parent, "chore(arw): invalidate parent review after merging "+id); err != nil {
+				return MergeResult{}, fmt.Errorf("task was merged, but invalidating parent review failed: %w", err)
+			}
+		}
+	}
+	return MergeResult{Task: entry, SourceBranch: entry.Branch, TargetBranch: targetBranch, HeadSHA: mergedHead}, nil
+}
+
+func (s Service) mergeTarget(entry task.Task) (string, error) {
+	if entry.ParentTask != "" {
+		parent, err := s.Ledger.Get(entry.ParentTask)
+		if err != nil {
+			return "", fmt.Errorf("load parent task %q: %w", entry.ParentTask, err)
+		}
+		return parent.Branch, nil
+	}
+	if !s.Git.BranchExists(entry.Base.Ref) {
+		return "", fmt.Errorf("recorded base %q is not a local branch and cannot be used as a merge target", entry.Base.Ref)
+	}
+	return entry.Base.Ref, nil
+}
+
 func (s Service) Abandon(id string) (task.Task, error) {
 	entry, err := s.Ledger.Get(id)
 	if err != nil {
@@ -178,28 +279,6 @@ func (s Service) Abandon(id string) (task.Task, error) {
 	entry.Lifecycle = task.Abandoned
 	task.Touch(&entry)
 	if err := s.Ledger.Save(entry, "chore(arw): abandon task "+id); err != nil {
-		return task.Task{}, err
-	}
-	return entry, nil
-}
-
-func (s Service) RecordTest(id string, evidence task.TestEvidence) (task.Task, error) {
-	entry, err := s.Ledger.Get(id)
-	if err != nil {
-		return task.Task{}, err
-	}
-	if entry.Lifecycle == task.Merged || entry.Lifecycle == task.Abandoned {
-		return task.Task{}, fmt.Errorf("cannot record test evidence for %s task", entry.Lifecycle)
-	}
-	if evidence.RecordedAt == "" {
-		evidence.RecordedAt = time.Now().Format(time.RFC3339)
-	}
-	if err := evidence.Validate(); err != nil {
-		return task.Task{}, err
-	}
-	entry.Tests = append(entry.Tests, evidence)
-	task.Touch(&entry)
-	if err := s.Ledger.Save(entry, "chore(arw): record test evidence for "+id); err != nil {
 		return task.Task{}, err
 	}
 	return entry, nil
@@ -240,14 +319,23 @@ func (s Service) ReviewStatus(id string) (review.Snapshot, error) {
 	return review.Prepare(s.Git, entry, all)
 }
 
-func (s Service) Approve(id string) (task.Task, review.Snapshot, error) {
+func (s Service) Approve(id, expectedBaseSHA, expectedHeadSHA string) (task.Task, review.Snapshot, error) {
 	entry, err := s.Ledger.Get(id)
 	if err != nil {
 		return task.Task{}, review.Snapshot{}, err
 	}
+	if entry.Lifecycle == task.Merged || entry.Lifecycle == task.Abandoned {
+		return task.Task{}, review.Snapshot{}, fmt.Errorf("cannot approve %s task", entry.Lifecycle)
+	}
+	if !task.ValidSHA(expectedBaseSHA) || !task.ValidSHA(expectedHeadSHA) {
+		return task.Task{}, review.Snapshot{}, fmt.Errorf("approval requires the full base and HEAD SHA from the review the user actually completed")
+	}
 	all, err := s.Ledger.List()
 	if err != nil {
 		return task.Task{}, review.Snapshot{}, err
+	}
+	if snapshot.Base.SHA != expectedBaseSHA || snapshot.Head.SHA != expectedHeadSHA {
+		return task.Task{}, review.Snapshot{}, fmt.Errorf("reviewed version changed: user reviewed %s...%s, current range is %s...%s", expectedBaseSHA, expectedHeadSHA, snapshot.Base.SHA, snapshot.Head.SHA)
 	}
 	snapshot, err := review.Prepare(s.Git, entry, all)
 	if err != nil {
@@ -275,6 +363,9 @@ func (s Service) RequestChanges(id, reason string) (task.Task, error) {
 	entry, err := s.Ledger.Get(id)
 	if err != nil {
 		return task.Task{}, err
+	}
+	if entry.Lifecycle == task.Merged || entry.Lifecycle == task.Abandoned {
+		return task.Task{}, fmt.Errorf("cannot request changes for %s task", entry.Lifecycle)
 	}
 	entry.Lifecycle = task.Active
 	entry.Review.Status = task.ReviewChangesRequested

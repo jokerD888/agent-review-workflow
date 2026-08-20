@@ -4,7 +4,7 @@
   "title": "ARW Review Snapshot",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "task_id", "created_at", "base", "head", "comparison", "files", "commits", "working_tree", "tests", "dependency_status", "review_status", "risks"],
+  "required": ["schema_version", "task_id", "created_at", "base", "head", "comparison", "files", "commits", "working_tree", "dependency_status", "review_status", "risks"],
   "properties": {
     "schema_version": { "const": 1 },
     "task_id": { "type": "string" },
@@ -15,7 +15,6 @@
     "files": { "type": "array", "items": { "$ref": "#/$defs/file" } },
     "commits": { "type": "array", "items": { "$ref": "#/$defs/commit" } },
     "working_tree": { "type": "string", "enum": ["clean", "dirty", "unknown"] },
-    "tests": { "type": "array", "items": { "type": "object" } },
     "dependency_status": { "type": "string", "enum": ["clear", "awaiting_prerequisite_review", "parent_changed", "blocked"] },
     "review_status": { "type": "string", "enum": ["none", "changes_requested", "conditional", "approved", "stale"] },
     "risks": { "type": "array", "items": { "type": "string" } }

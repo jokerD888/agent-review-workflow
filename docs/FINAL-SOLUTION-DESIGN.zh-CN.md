@@ -2,7 +2,7 @@
 
 > 状态：已确认的目标架构，供后续实现窗口直接执行。  
 > 版本：v2 设计稿。  
-> 重要：仓库当前的 PowerShell/Shell 脚本是 v1；本文描述的任务台账、MCP 服务和 VS Code 扩展尚未实现。不要把本文的目标能力误认为现有能力。
+> 重要：本文是 v2 的目标架构，不是实现状态清单。以 README、源码和测试为准；ARW 不提供 VS Code 扩展，代码 diff 复用 VS Code Source Control 或 GitLens。
 
 ## 1. 目标与边界
 
@@ -13,20 +13,20 @@ Agent Review Workflow（ARW）让开发者以自然语言管理 AI 编写代码�
 ### 1.1 必须达成的结果
 
 - 以**任务**而不是日期或临时分支作为工作单元。
-- 每个任务保存分支、基准提交、依赖任务、生命周期、测试证据和审查快照。
+- 每个任务保存分支、基准提交、依赖任务、生命周期和审查快照。
 - 支持独立任务和堆叠任务（例如 `main <- A <- B`）。
 - 在 Codex、Claude Code、OpenCode 中用自然语言触发受限的工作流操作。
 - 在 Windows 和 Linux 上使用同一个短命令 `arw`，且不依赖保留本地源码仓库。
-- 在 VS Code 中提供任务列表、依赖关系、正确基准下的文件列表和逐文件 diff。
+- 输出精确的审查 base/head SHA，使开发者可在 VS Code Source Control 或 GitLens 中查看正确范围的 diff。
 - 默认不打断正在使用的 VS Code 窗口；需要时才在新窗口打开另一个任务。
 - 审查、合并、推送和代码改写都有可审计、可确认的边界。
 
 ### 1.2 明确不做的事
 
-- 不让 AI 仅凭自身判断自动合并、推送、rebase、reset、强推、删除分支或删除 worktree。
+- 不让 AI 仅凭自身判断批准或合并任务，也不允许其自行推送、rebase、reset、强推、删除分支或删除 worktree。用户明确表达批准或本地合并意图后，Agent 可以调用对应的受限工具代为执行。
 - 不提供 `run_arw("任意 shell 文本")` 这类泛化的 Agent 工具。
 - 不用鼠标/屏幕自动化操纵 VS Code 内部 UI。
-- v2 第一阶段不支持 vscode.dev、github.dev 或浏览器版 VS Code；这些环境不能可靠启动本地 `arw` 可执行文件。
+- 不构建或维护自定义 IDE diff 界面；ARW 复用开发者已有的 Git 工具。
 - 不把 `.env`、令牌、数据库密码、完整源代码 diff 上传到中心服务；系统是本地优先的。
 
 ## 2. 总体架构
@@ -44,9 +44,8 @@ arw 核心程序（唯一的任务与 Git 业务实现）
         |--------------------|
         |                    |
 Git / worktree         任务台账元数据分支
-        ^                    ^
         |                    |
-VS Code 扩展 ----------- JSON 输出 / CLI API
+        +---- 审查快照（base/head SHA） ----> VS Code Source Control / GitLens
 ```
 
 ### 2.1 技术决策
@@ -55,9 +54,9 @@ VS Code 扩展 ----------- JSON 输出 / CLI API
 | --- | --- | --- |
 | 核心 CLI `arw` | Go | Windows/Linux 独立二进制、安装简单、适合可靠调度 Git 命令。 |
 | MCP 服务 `arw-mcp` | Go | 与核心共享同一状态机和校验，避免再维护一套 Node 业务逻辑。 |
-| VS Code 扩展 | TypeScript | VS Code 扩展 API 的原生生态。 |
+| 差异查看 | VS Code Source Control / GitLens | 复用成熟 Git UI；ARW 只提供任务上下文和精确 SHA。 |
 | 安装器 | PowerShell + POSIX Shell | 仅下载、校验、配置和迁移；不承载业务逻辑。 |
-| 层间契约 | JSON Schema | CLI、MCP、扩展和测试共同使用的稳定数据模型。 |
+| 层间契约 | JSON Schema | CLI、MCP 和测试共同使用的稳定数据模型。 |
 
 语言不是安全边界。避免错误 Git 操作依靠严格的命令白名单、状态校验、明确确认与审计记录，而不是依靠某种语言本身。
 
@@ -68,7 +67,7 @@ VS Code 扩展 ----------- JSON 输出 / CLI API
 | 任务（Task） | 一个可独立理解、测试和审查的工作单元。 |
 | 基准（Base） | 创建或审查任务时使用的具体 Git 提交，而不仅是 `main` 这个会移动的名字。 |
 | 父任务（Parent） | 当前任务直接建立在其上的任务，例如 B 建立在 A 上。 |
-| 审查快照（Review Snapshot） | 某次审查时的 `base SHA`、`head SHA`、文件统计、测试证据及结论。 |
+| 审查快照（Review Snapshot） | 某次审查时的 `base SHA`、`head SHA`、文件统计及结论。 |
 | 条件审查 | B 相对未最终验收的 A 所做的审查；不能等同于 B 相对 `main` 的最终验收。 |
 | 搁置（Parked） | 暂不推进但保留任务和历史；与放弃不同。 |
 | Worktree | 同一 Git 仓库的独立工作目录，用来同时保留不同任务的代码现场。 |
@@ -138,9 +137,6 @@ review:
   reviewed_base_sha: null
   reviewed_head_sha: null
 dependencies: []
-tests:
-  - command: npm test
-    result: passed
 created_at: 2026-08-12T09:00:00+08:00
 updated_at: 2026-08-12T11:00:00+08:00
 ```
@@ -204,8 +200,8 @@ main <- arw/feature-a <- arw/feature-b
 1. 审查 B 时，比较 `A...B`，只看 B 相对 A 的改动。
 2. 如果 A 尚未验收，B 的结论只能是 `conditional`。
 3. 建议先审 A；用户仍可自由先审 B。
-4. 默认不把 B 合入 A。先合 A 到 `main`，再将 B 更新到新的 `main`，最后对 B 做最终审查。
-5. 只有用户明确说明 A、B 必须作为同一次交付时，才把它们合并为一个工作单元。
+4. 用户明确批准 B 并单独要求合并后，可将 B 快进合入记录的父分支 A；此时 A 的 HEAD 已变化，A 原有批准失效，需要重新审查后才能继续向上合并。
+5. 工具不自动解决冲突，也不会把批准等同于合并或推送授权。
 
 ### 6.3 审查失效规则
 
@@ -248,9 +244,10 @@ C:\code\my-app-worktrees\
 | “开始修复登录跳转” | 创建/定位任务、分支、worktree、基准记录。 | 不会改 `main`、不会推送。 |
 | “有哪些待审任务？” | 列出 `ready_for_review` 与 `in_review`，并标出依赖阻塞。 | 不把所有分支混入结果。 |
 | “审查登录跳转” | 生成审查快照和对话摘要。 | 不切换 VS Code、不合并。 |
-| “在 VS Code 中审查数据库修复” | 生成审查快照，并在新窗口打开目标 worktree/审查视图。 | 不抢占当前编码窗口。 |
+| “在 VS Code 中审查数据库修复” | 生成审查快照，并在新窗口打开目标 worktree。 | 不抢占当前编码窗口。 |
 | “先搁置功能 A” | 记录为 `parked`，保留审查结论。 | 不删除分支或代码。 |
 | “A 审查通过” | 复述任务、基准、HEAD 和影响；确认后记录人工批准。 | 不自动 merge/push。 |
+| “把 A 合并到父分支” | 校验批准与版本，快进合入记录的父/base 分支并更新台账。 | 不选择任意目标、不解决冲突、不 push。 |
 
 当用户要求审查 B，而 B 依赖尚未审查的 A 时，Agent 必须先提示：
 
@@ -263,7 +260,7 @@ B 依赖 A；推荐先审 A。
 
 ## 9. `arw` CLI 和机器接口
 
-面向人类的命令保持简短；面向扩展和 MCP 的输出使用稳定 JSON。
+面向人类的命令保持简短；面向 MCP 的输出使用稳定 JSON。
 
 ```text
 arw setup
@@ -275,11 +272,13 @@ arw task list [--view reviewable|active|parked|blocked]
 arw task show <task-id>
 arw task park <task-id>
 arw task resume <task-id>
+arw task merge --confirm <task-id>
+arw task mark-merged --confirm <task-id>
 
 arw review prepare <task-id>
 arw review status <task-id>
-arw review approve <task-id>
-arw review request-changes <task-id>
+arw review approve --confirm --base <reviewed-base-sha> --head <reviewed-head-sha> <task-id>
+arw review request-changes <task-id> [--reason text]
 
 arw worktree open <task-id>
 arw refresh
@@ -302,7 +301,6 @@ arw refresh
   "files": [],
   "commits": [],
   "workingTree": "clean",
-  "tests": [],
   "dependencyStatus": "clear",
   "reviewStatus": "none",
   "risks": []
@@ -323,6 +321,12 @@ workflow_prepare_review(task_id)
 workflow_open_review(task_id, new_window)
 workflow_park_task(task_id)
 workflow_resume_task(task_id)
+workflow_mark_ready(task_id)
+workflow_approve_task(task_id, expected_base_sha, expected_head_sha, confirm)
+workflow_request_changes(task_id, reason?)
+workflow_merge_task(task_id, confirm)
+workflow_mark_merged(task_id, confirm)
+workflow_abandon_task(task_id, confirm)
 workflow_refresh()
 ```
 
@@ -331,14 +335,16 @@ workflow_refresh()
 ```text
 任意 shell 执行
 git push
-git merge
+任意目标或参数的 git merge
 git rebase
 git reset
 git branch --delete
 删除 worktree
 ```
 
-人工审查结论的记录属于高影响动作。只有用户明确表达“通过”“要求修改”“搁置”等意图时，Agent 才能调用相应的受限操作；最佳 UI 是在 VS Code 扩展中由用户点击确认。
+人工审查结论和本地合并属于高影响动作。只有用户明确表达“通过”“要求修改”或“合并到父分支”等意图时，Agent 才能调用相应的受限操作。批准必须同时提交用户实际看过的 expected base/head；当前版本不一致时拒绝，不能用新快照替换。`confirm=true` 用于防误触，但不是身份认证；上层 Agent 规则仍必须保证意图来自用户。
+
+`workflow_merge_task` 不接受任意目标分支：目标由 `parent_task` 或任务创建时的 base ref 推导。它要求任务处于当前批准状态、源和目标 worktree 干净、目标 HEAD 仍等于审查 base，并只执行 `--ff-only` 本地合并；任何冲突或目标移动都会停止，且永不 push。
 
 各 Agent 的适配层负责：
 
@@ -347,53 +353,15 @@ git branch --delete
 - 告知 Agent：先读取任务上下文，再写代码或准备审查；
 - 使 Codex、Claude Code、OpenCode 调用同一组工具和同一状态机。
 
-## 11. VS Code 扩展设计
+## 11. 审查界面边界
 
-扩展名称：`Agent Review Workflow`。
+ARW 不实现自定义 VS Code 扩展，也不试图替代 Git 的历史和 diff 界面。`arw review prepare <task-id>` 返回本次审查的不可变 `base SHA` 和 `head SHA`，同时记录任务、依赖和风险上下文。
 
-### 11.1 MVP 功能
+- 常规任务审查：在对应 task worktree 中使用 VS Code Source Control / Source Control Graph，对比任务分支与记录的 base 分支或提交。
+- 任意两个历史提交的全量比较：使用 GitLens 或 `git diff <base-sha> <head-sha>`。
+- 审查结论：仍由用户通过对话明确表达，ARW/MCP 把批准绑定到实际查看的 base/head；展示工具不负责改变任务状态。
 
-在活动栏提供以下视图：
-
-```text
-Agent Review
-├─ 待审查
-├─ 进行中
-├─ 依赖阻塞
-├─ 已搁置
-└─ 已完成
-```
-
-选中任务显示：
-
-- 任务名称、分支、基准 SHA、HEAD SHA；
-- 生命周期、审查结论、依赖状态；
-- 文件变更统计和提交列表；
-- 测试证据、风险提示、父/子任务关系；
-- “相对谁比较”的明确文字。
-
-点击一个变更文件时，扩展使用 VS Code 的原生左右 diff 编辑器显示正确基准与任务 HEAD 的差异。颜色遵循用户当前主题；扩展不修改全局 diff 配色。
-
-### 11.2 命令
-
-```text
-ARW: 审查当前任务
-ARW: 打开任务审查
-ARW: 在新窗口打开任务
-ARW: 查看任务依赖图
-ARW: 标记任务为搁置
-ARW: 记录审查通过
-ARW: 请求修改
-```
-
-“打开任务审查”必须：
-
-1. 调用 `arw review prepare` 取得真实比较范围；
-2. 如果该任务不是当前 worktree，则新开 VS Code 窗口；
-3. 打开 ARW 的任务详情和变更文件树；
-4. 不切换现有窗口的分支，不模拟鼠标点击。
-
-第一阶段只支持桌面 VS Code。浏览器版扩展不能启动本地子进程，后续如需支持，需要采用远程服务/远程扩展宿主方案。
+因此，ARW 的价值是“审查结论和合并约束”，不是“再造一个 diff 面板”。
 
 ## 12. 安全、确认与审计
 
@@ -403,8 +371,9 @@ ARW: 请求修改
 | --- | --- | --- |
 | 只读 | 列表、状态、diff、诊断 | 可直接执行。 |
 | 本地可逆 | 创建任务分支/worktree、搁置、恢复、准备审查 | 必须来自用户的明确任务意图。 |
-| 人工结论 | 通过、要求修改、放弃 | 必须有用户明确表达或 VS Code 点击确认。 |
-| 高风险/远程 | merge、push、rebase、reset、删除 | 不由 MCP 暴露；保留给用户直接执行。 |
+| 人工结论 | 通过、要求修改、放弃 | 必须有用户明确表达。 |
+| 受限本地合并 | 将已批准任务快进到记录的父/base 分支 | 必须由用户单独明确要求；不接受任意目标、不解决冲突。 |
+| 高风险/远程 | push、rebase、reset、删除、任意 merge | 不由 MCP 暴露；需要独立授权和外部工具。 |
 
 ### 12.2 审计内容
 
@@ -413,7 +382,6 @@ ARW: 请求修改
 - 任务 ID、操作者标识、时间；
 - base SHA、head SHA、父任务状态；
 - 变更文件/提交统计；
-- 已运行测试的命令、退出码和摘要；
 - 审查结论与原因；
 - 结论何时、为何失效。
 
@@ -429,7 +397,6 @@ GitHub Release
 ├─ arw_linux_amd64
 ├─ arw_linux_arm64
 ├─ arw-mcp_...
-├─ agent-review-workflow-<version>.vsix
 └─ checksums.txt / provenance
 ```
 
@@ -440,7 +407,6 @@ GitHub Release
 3. 校验 SHA-256；
 4. 放入用户数据目录并把 `bin` 加入 PATH；
 5. 写入 Codex、Claude Code、OpenCode 的受控配置块；
-6. 安装或提示安装 VS Code 扩展。
 
 运行时位置：
 
@@ -465,7 +431,6 @@ agent-review-workflow/
 │  ├─ review/                  审查快照、比较范围、失效规则
 │  └─ worktree/                worktree 创建、发现、锁定
 ├─ schemas/                    JSON Schema 与契约测试样本
-├─ vscode-extension/           TypeScript 扩展
 ├─ integrations/
 │  ├─ codex/
 │  ├─ claude-code/
@@ -494,7 +459,7 @@ agent-review-workflow/
 
 ### Phase 2：审查快照与依赖图
 
-- 实现正确的 `base...head` 比较、未提交改动检测、提交/文件统计、测试证据。
+- 实现正确的 `base...head` 比较、未提交改动检测、提交/文件统计。
 - 实现父子任务、条件审查和审查失效。
 - 验收：`main <- A <- B` 下，B 不会被错误标记为最终通过。
 
@@ -504,15 +469,10 @@ agent-review-workflow/
 - 配置 Codex、Claude Code、OpenCode 的说明与 MCP 入口。
 - 验收：三种 Agent 对同一任务得到一致的分支、状态和审查基准；无泛用 shell 工具。
 
-### Phase 4：VS Code 扩展 MVP
-
-- 任务树、任务详情、正确范围的文件列表、原生 diff 打开、新窗口 worktree 打开。
-- 验收：用户正在 A 中编码时，能打开 B 的审查而不改变 A 的窗口或分支。
-
-### Phase 5：发布、升级与稳固
+### Phase 4：发布、升级与稳固
 
 - Release 自动构建、SHA-256、构建来源证明、升级与迁移。
-- Windows/Linux 集成测试、MCP 契约测试、VS Code 扩展测试。
+- Windows/Linux 集成测试、MCP 契约测试。
 - 验收：在新机器中从公开地址安装后，不依赖原始克隆目录即可正常使用。
 
 ## 16. 测试策略
@@ -521,7 +481,6 @@ agent-review-workflow/
 - **Git 集成测试**：临时仓库中验证独立任务、堆叠任务、脏工作区、main 前进、冲突后的失效。
 - **跨平台测试**：Windows 与 Linux 的安装、PATH、worktree、CLI JSON 输出。
 - **MCP 契约测试**：每个工具的输入/输出均通过 JSON Schema，并验证禁止的动作不可调用。
-- **扩展测试**：任务树、命令注册、diff URI、当前窗口不被切换的回归测试。
 - **人工验收**：用 Codex、Claude Code、OpenCode 各跑一遍“开始任务 → 写代码 → 审查 → 搁置 → 恢复 → 审查依赖任务”。
 
 ## 17. 最终验收场景
@@ -535,9 +494,9 @@ agent-review-workflow/
 1. 找到“数据库修复”任务，或在存在歧义时要求澄清；
 2. 检查其分支、worktree、基准 SHA 和依赖；
 3. 若依赖未验收，建议先审父任务，并明确本次只能是条件审查；
-4. 生成真实的审查快照和测试/风险摘要；
-5. 在不影响当前编码窗口的前提下，打开目标任务的新 VS Code 审查窗口；
-6. 展示正确基准下的文件变更和逐文件 diff；
-7. 不自行 merge、push、rebase、reset 或删除任何工作内容。
+4. 生成真实的审查快照和风险摘要；
+5. 在不影响当前编码窗口的前提下，按需打开目标任务的 VS Code worktree；
+6. 返回精确的 base/head SHA，用户用 VS Code Source Control 或 GitLens 查看变更；
+7. 在用户未单独要求时不 merge，并且不自行 push、rebase、reset 或删除任何工作内容。
 
 满足这一场景，即说明 ARW 的核心价值已真正落地。

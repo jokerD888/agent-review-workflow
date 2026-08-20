@@ -1,7 +1,6 @@
 [CmdletBinding()]
 param(
     [string]$Version = 'latest',
-    [switch]$InstallExtension,
     [switch]$ConfigureAgents,
     [switch]$Force
 )
@@ -115,12 +114,6 @@ try {
     Copy-Item -LiteralPath (Join-Path $BinDirectory 'arw-mcp_windows_amd64.exe') -Destination (Join-Path $BinDirectory 'arw-mcp.exe') -Force
     $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
     if (($userPath -split ';') -notcontains $BinDirectory) { [Environment]::SetEnvironmentVariable('Path', "$userPath;$BinDirectory", 'User'); Write-Host "Added $BinDirectory to user PATH; open a new terminal." }
-    if ($InstallExtension) {
-        $vsix = "agent-review-workflow-$tag.vsix"
-        $vsixPath = Join-Path $temporary $vsix
-        Download-Checked $releaseBase $vsix $vsixPath $checksums
-        & code --install-extension $vsixPath --force
-    }
     if ($ConfigureAgents) { Set-AgentMcpConfig $rulesPath }
     Write-Host "Installed ARW $tag in $RuntimeRoot. Run 'arw doctor' from a repository."
 } finally { Remove-Item -LiteralPath $temporary -Recurse -Force -ErrorAction SilentlyContinue }
