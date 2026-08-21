@@ -56,7 +56,7 @@ func run(args []string) error {
 func taskCommand(svc app.Service, args []string) error {
 	args, jsonOutput := withoutFormat(args)
 	if len(args) == 0 {
-		return errors.New("usage: arw task <start|list|show|park|resume|ready|merge|abandon> ...")
+		return errors.New("usage: arw task <start|list|show|park|resume|ready|merge|abandon|clear> ...")
 	}
 	switch args[0] {
 	case "start":
@@ -149,6 +149,26 @@ func taskCommand(svc app.Service, args []string) error {
 			return err
 		}
 		return output(entry, jsonOutput)
+	case "clear":
+		clearArgs, confirm := stripBool(args[1:], "--confirm")
+		if !confirm {
+			return errors.New("clear deletes branches and worktrees; repeat with --confirm")
+		}
+		if len(clearArgs) == 1 {
+			result, err := svc.Clear(clearArgs[0])
+			if err != nil {
+				return err
+			}
+			return output(result, jsonOutput)
+		}
+		if len(clearArgs) == 0 {
+			results, err := svc.ClearMerged()
+			if err != nil {
+				return err
+			}
+			return output(results, jsonOutput)
+		}
+		return errors.New("usage: arw task clear --confirm <task-id> | arw task clear --all-merged --confirm")
 	default:
 		return fmt.Errorf("unknown task command %q", args[0])
 	}
@@ -311,6 +331,8 @@ Usage:
   arw task show|park|resume|ready <task-id>
   arw task merge --confirm <task-id>
   arw task abandon --confirm <task-id>
+  arw task clear --confirm <task-id>
+  arw task clear --confirm                  # clear all merged/abandoned
   arw review prepare <task-id>
   arw review approve --confirm --base <sha> --head <sha> <task-id>
   arw review request-changes <task-id> [--reason text]

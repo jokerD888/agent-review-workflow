@@ -105,6 +105,33 @@ func Prepare(git gitclient.Client, current task.Task, all []task.Task) (Snapshot
 	return Snapshot{SchemaVersion: 1, TaskID: current.ID, CreatedAt: time.Now().Format(time.RFC3339), Base: Revision{Ref: baseRef, SHA: base}, Head: Revision{SHA: head}, Comparison: baseRef + "@" + base + "...HEAD@" + head, Files: files, Commits: commits, WorkingTree: workingTree, Worktree: worktree, DependencyStatus: dependency, ReviewStatus: current.Review.Status, ApprovalValidity: approvalValidity, Risks: risks}, nil
 }
 
+// EffectiveTargetRef walks up the parent chain, skipping tasks whose lifecycle
+// is Merged (their content has already landed further up the chain), and
+// returns the branch name of the first non-merged ancestor. If the chain has
+// no parent task, the task's recorded Base.Ref is returned. An Abandoned
+// ancestor aborts the walk: a child of an abandoned task requires the user to
+// decide how to proceed.
+func EffectiveTargetRef(entry task.Task, all []task.Task) (string, error) {
+	cur := entry
+	for {
+		if cur.ParentTask == "" {
+			return cur.Base.Ref, nil
+		}
+		parent, ok := find(all, cur.ParentTask)
+		if !ok {
+			return "", fmt.Errorf("parent task %q is missing", cur.ParentTask)
+		}
+		switch parent.Lifecycle {
+		case task.Merged:
+			cur = parent
+		case task.Abandoned:
+			return "", fmt.Errorf("parent task %q was abandoned; resolve the dependency manually", cur.ParentTask)
+		default:
+			return parent.Branch, nil
+		}
+	}
+}
+
 func comparisonBase(git gitclient.Client, current task.Task, all []task.Task) (string, string, DependencyStatus, error) {
 	if current.ParentTask == "" {
 		base, err := git.Resolve(current.Base.Ref)
@@ -116,6 +143,30 @@ func comparisonBase(git gitclient.Client, current task.Task, all []task.Task) (s
 	parent, ok := find(all, current.ParentTask)
 	if !ok {
 		return "", "", DependencyBlocked, fmt.Errorf("parent task %q is missing", current.ParentTask)
+	}
+	// When the parent has already been merged, its content has landed further
+	// up the chain. Walk up to the effective target branch and use its current
+	// HEAD as this task's base. The parent's own approval validity is no longer
+	// relevant — what matters is whether this task's reviewed base still
+	// matches the effective target's current HEAD.
+	if parent.Lifecycle == task.Merged {
+		ref, err := EffectiveTargetRef(parent, all)
+		if err != nil {
+			return "", "", DependencyBlocked, err
+		}
+		mergedHead, err := git.Resolve(ref)
+		if err != nil {
+			return "", "", DependencyBlocked, fmt.Errorf("resolve effective target %q: %w", ref, err)
+		}
+		if current.Review.Status == task.ReviewApproved && current.Review.ReviewedBaseSHA != "" && current.Review.ReviewedBaseSHA != mergedHead {
+			return mergedHead, ref, ParentChanged, nil
+		}
+		return mergedHead, ref, DependencyClear, nil
+	}
+	// An abandoned parent cannot serve as a base. The user must decide how to
+	// resolve the child (rebase, abandon, or re-parent it).
+	if parent.Lifecycle == task.Abandoned {
+		return "", "", DependencyBlocked, fmt.Errorf("parent task %q was abandoned; resolve the dependency manually", current.ParentTask)
 	}
 	parentHead, err := git.Resolve(parent.Branch)
 	if err != nil {

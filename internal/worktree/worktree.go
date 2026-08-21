@@ -2,6 +2,7 @@ package worktree
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -39,4 +40,25 @@ func Find(git gitclient.Client, branch string) (string, error) {
 		}
 	}
 	return "", nil
+}
+
+// Remove deletes a worktree and its branch. It is idempotent: if the worktree
+// or branch is already gone, the corresponding step is skipped. The worktree
+// is removed with --force because callers only invoke Remove on tasks that
+// have already been merged or abandoned, so uncommitted changes are not
+// expected to be preserved.
+func Remove(git gitclient.Client, branch, path string) error {
+	if path != "" {
+		if _, err := os.Stat(path); err == nil {
+			if _, err := git.Run("worktree", "remove", "--force", path); err != nil {
+				return fmt.Errorf("remove worktree at %s: %w", path, err)
+			}
+		}
+	}
+	if git.BranchExists(branch) {
+		if _, err := git.Run("branch", "-D", branch); err != nil {
+			return fmt.Errorf("delete branch %q: %w", branch, err)
+		}
+	}
+	return nil
 }

@@ -63,9 +63,13 @@
 - When `arw` and its typed `arw-mcp` tools are available and the user has chosen
   ARW for a named task, read `workflow_get_task` before starting AI work. Use
   `workflow_list_tasks` only when the task is not yet known.
-- Map a clear user intent such as “开始修复登录跳转” only to
-  `workflow_start_task`; map review requests to `workflow_prepare_review`.
-  Never pass arbitrary shell text to ARW.
+- Creating a task adds a branch (`arw/<id>`) and a worktree and fixes the task
+  id the user will reference in later instructions. Before calling
+  `workflow_start_task`, briefly propose the intended task id, branch, and
+  worktree path and let the user confirm or rename; do not create a task
+  silently. Map a clear user intent such as “开始修复登录跳转” to
+  `workflow_start_task` only after that confirmation; map review requests to
+  `workflow_prepare_review`. Never pass arbitrary shell text to ARW.
 - For “在 VS Code 中审查 …”, prepare the review first, then return its worktree
   path and exact base/head range. Do not change the current VS Code window's
   branch or worktree; the user chooses the editor or Git UI.
@@ -82,3 +86,8 @@
   asks to merge an approved task, call `workflow_merge_task`; it may only perform
   the tool's local fast-forward merge. Never treat merge permission as push
   permission, and never resolve a merge conflict without a new explicit request.
+- A user saying "clear" or "清理" for a named merged or abandoned task is
+  sufficient intent for `workflow_clear_task`. "clear all merged" or "清理已合并"
+  maps to `workflow_clear_merged`. Clearing deletes the task branch and worktree
+  but preserves the registry record (for audit and parent-chain resolution).
+  Never clear an active or ready-for-review task.

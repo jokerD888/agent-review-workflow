@@ -42,6 +42,12 @@ type MergeResult struct {
 	HeadSHA      string    `json:"headSHA"`
 }
 
+type ClearResult struct {
+	Task         task.Task `json:"task"`
+	Branch       string    `json:"branch"`
+	WorktreePath string    `json:"worktreePath"`
+}
+
 func (s Service) Setup() error { return s.Ledger.Setup() }
 
 func (s Service) Start(options StartOptions) (StartResult, error) {
@@ -75,7 +81,24 @@ func (s Service) Start(options StartOptions) (StartResult, error) {
 		if err != nil {
 			return StartResult{}, fmt.Errorf("load parent task: %w", err)
 		}
-		baseRef = parentEntry.Branch
+		// If the parent has already been merged or cleared, its branch may no
+		// longer exist locally. Walk up the chain to find the effective target
+		// branch and use its current HEAD as the new task's base.
+		if parentEntry.Lifecycle == task.Merged {
+			all, err := s.Ledger.List()
+			if err != nil {
+				return StartResult{}, fmt.Errorf("load tasks for parent resolution: %w", err)
+			}
+			ref, err := review.EffectiveTargetRef(parentEntry, all)
+			if err != nil {
+				return StartResult{}, err
+			}
+			baseRef = ref
+		} else if parentEntry.Lifecycle == task.Abandoned {
+			return StartResult{}, fmt.Errorf("parent task %q was abandoned; create the child from an active or merged task instead", parent)
+		} else {
+			baseRef = parentEntry.Branch
+		}
 		baseSHA, err = s.Git.Resolve(baseRef)
 		if err != nil {
 			return StartResult{}, err
@@ -220,17 +243,24 @@ func (s Service) Merge(id string) (MergeResult, error) {
 }
 
 func (s Service) mergeTarget(entry task.Task) (string, error) {
-	if entry.ParentTask != "" {
-		parent, err := s.Ledger.Get(entry.ParentTask)
-		if err != nil {
-			return "", fmt.Errorf("load parent task %q: %w", entry.ParentTask, err)
+	if entry.ParentTask == "" {
+		if !s.Git.BranchExists(entry.Base.Ref) {
+			return "", fmt.Errorf("recorded base %q is not a local branch and cannot be used as a merge target", entry.Base.Ref)
 		}
-		return parent.Branch, nil
+		return entry.Base.Ref, nil
 	}
-	if !s.Git.BranchExists(entry.Base.Ref) {
-		return "", fmt.Errorf("recorded base %q is not a local branch and cannot be used as a merge target", entry.Base.Ref)
+	all, err := s.Ledger.List()
+	if err != nil {
+		return "", fmt.Errorf("load tasks for merge target resolution: %w", err)
 	}
-	return entry.Base.Ref, nil
+	ref, err := review.EffectiveTargetRef(entry, all)
+	if err != nil {
+		return "", err
+	}
+	if !s.Git.BranchExists(ref) {
+		return "", fmt.Errorf("effective merge target %q is not a local branch (it may have been cleared or is a remote ref)", ref)
+	}
+	return ref, nil
 }
 
 func (s Service) Abandon(id string) (task.Task, error) {
@@ -247,6 +277,52 @@ func (s Service) Abandon(id string) (task.Task, error) {
 		return task.Task{}, err
 	}
 	return entry, nil
+}
+
+// Clear removes the Git worktree and branch of a task that has already reached
+// a terminal lifecycle (Merged or Abandoned). The registry record is preserved
+// so the parent chain and audit history remain intact; only the local Git
+// resources are reclaimed. Clear is idempotent: if the worktree or branch is
+// already gone, those steps are skipped.
+func (s Service) Clear(id string) (ClearResult, error) {
+	entry, err := s.Ledger.Get(id)
+	if err != nil {
+		return ClearResult{}, err
+	}
+	if entry.Lifecycle != task.Merged && entry.Lifecycle != task.Abandoned {
+		return ClearResult{}, fmt.Errorf("task %q is %s; only merged or abandoned tasks can be cleared", id, entry.Lifecycle)
+	}
+	path, err := worktree.Find(s.Git, entry.Branch)
+	if err != nil {
+		return ClearResult{}, fmt.Errorf("locate worktree for %q: %w", id, err)
+	}
+	if err := worktree.Remove(s.Git, entry.Branch, path); err != nil {
+		return ClearResult{}, err
+	}
+	return ClearResult{Task: entry, Branch: entry.Branch, WorktreePath: path}, nil
+}
+
+// ClearMerged clears every task whose lifecycle is Merged or Abandoned. It
+// returns the result of each successful clear in order. If a clear fails, the
+// already-completed clears are returned alongside the error so the caller can
+// report partial progress.
+func (s Service) ClearMerged() ([]ClearResult, error) {
+	entries, err := s.Ledger.List()
+	if err != nil {
+		return nil, err
+	}
+	results := []ClearResult{}
+	for _, entry := range entries {
+		if entry.Lifecycle != task.Merged && entry.Lifecycle != task.Abandoned {
+			continue
+		}
+		result, err := s.Clear(entry.ID)
+		if err != nil {
+			return results, fmt.Errorf("clear task %q: %w", entry.ID, err)
+		}
+		results = append(results, result)
+	}
+	return results, nil
 }
 
 func (s Service) PrepareReview(id string) (review.Snapshot, error) {

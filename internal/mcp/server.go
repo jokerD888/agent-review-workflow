@@ -221,6 +221,20 @@ func execute(call toolCall) (any, error) {
 			return nil, fmt.Errorf("confirm must be true before abandoning a task")
 		}
 		return svc.Abandon(id)
+	case "workflow_clear_task":
+		id, err := requiredString(args, "task_id")
+		if err != nil {
+			return nil, err
+		}
+		if confirmed, _ := args["confirm"].(bool); !confirmed {
+			return nil, fmt.Errorf("confirm must be true before clearing a task's branch and worktree")
+		}
+		return svc.Clear(id)
+	case "workflow_clear_merged":
+		if confirmed, _ := args["confirm"].(bool); !confirmed {
+			return nil, fmt.Errorf("confirm must be true before clearing merged and abandoned tasks")
+		}
+		return svc.ClearMerged()
 	default:
 		return nil, fmt.Errorf("tool %q is not exposed", call.Name)
 	}
@@ -267,5 +281,7 @@ func definitions() []map[string]any {
 		{"name": "workflow_request_changes", "description": "Record the user's review conclusion that the task needs changes.", "inputSchema": map[string]any{"type": "object", "required": []string{"task_id"}, "properties": withTask(map[string]any{"reason": map[string]any{"type": "string"}})}},
 		{"name": "workflow_merge_task", "description": "After the user explicitly requests it, fast-forward an approved task into its recorded parent/base branch. Never pushes or resolves conflicts.", "inputSchema": map[string]any{"type": "object", "required": []string{"task_id", "confirm"}, "properties": withTask(map[string]any{"confirm": map[string]any{"type": "boolean"}})}},
 		{"name": "workflow_abandon_task", "description": "Record that a task was abandoned after the user confirms it. This retains its branch and worktree.", "inputSchema": map[string]any{"type": "object", "required": []string{"task_id", "confirm"}, "properties": withTask(map[string]any{"confirm": map[string]any{"type": "boolean"}})}},
+		{"name": "workflow_clear_task", "description": "After the user explicitly requests it, delete a merged or abandoned task's branch and worktree. The registry record is preserved for audit history and parent-chain resolution.", "inputSchema": map[string]any{"type": "object", "required": []string{"task_id", "confirm"}, "properties": withTask(map[string]any{"confirm": map[string]any{"type": "boolean"}})}},
+		{"name": "workflow_clear_merged", "description": "After the user explicitly requests it, delete branches and worktrees of all merged and abandoned tasks. Registry records are preserved.", "inputSchema": map[string]any{"type": "object", "required": []string{"confirm"}, "properties": map[string]any{"confirm": map[string]any{"type": "boolean"}, "cwd": cwd["cwd"]}}},
 	}
 }
