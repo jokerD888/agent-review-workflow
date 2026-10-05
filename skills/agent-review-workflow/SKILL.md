@@ -27,18 +27,22 @@ ARW provides structured, worktree-isolated task management with mandatory human 
 
 > [!IMPORTANT]
 > **绝对禁止绕过 ARW CLI 直接执行高危 Git 操作**（如手动创建/切换 worktree、git merge、git reset --hard、git checkout --、git push 等）。
-> **始终通过 Skill 自带的 Wrapper 脚本调用 ARW**，禁止猜测底层特定平台的二进制路径：
+> **所有 ARW 操作必须通过 Skill 自带的 Wrapper 脚本执行，严禁调用系统 PATH 中的 `arw` 或直接猜测底层平台二进制路径**。
 
-- **Windows (PowerShell)**:
+本文档中 `<ARW>` 指代当前平台对应的 Wrapper 命令：
+
+- **Windows**:
   ```powershell
-  pwsh <skill-directory>/scripts/arw.ps1 <command> [args...] --json
+  powershell -ExecutionPolicy Bypass -File <skill-directory>/scripts/arw.ps1 <command> [args...] --json
+  # 若宿主环境明确存在 PowerShell 7 (pwsh)，亦可调用：
+  # pwsh -File <skill-directory>/scripts/arw.ps1 <command> [args...] --json
   ```
-- **macOS / Linux (Shell)**:
+- **macOS / Linux**:
   ```sh
   <skill-directory>/scripts/arw.sh <command> [args...] --json
   ```
 
-始终附加 `--json` 以获取结构化机器可读输出。
+始终附加 `--json` 以获取稳定的结构化输出。
 
 ## 4. 主生命周期 (Lifecycle Workflow)
 
@@ -51,7 +55,7 @@ ARW provides structured, worktree-isolated task management with mandatory human 
 ### 步骤 1：创建任务 (Start)
 与用户确认任务简要目标和 ID 后创建：
 ```sh
-arw task start --id <task-id> "<task-title>" --json
+<ARW> task start --id <task-id> "<task-title>" --json
 ```
 - 返回新创建的独立 worktree 路径与分支名（`arw/<task-id>`）。
 - **后续代码编辑与测试必须在该 worktree 目录内进行**，不要修改主仓库工作区。
@@ -64,8 +68,8 @@ arw task start --id <task-id> "<task-title>" --json
 ### 步骤 3：标记就绪并准备审查 (Prepare Review)
 完成编码与自测后：
 ```sh
-arw task ready <task-id> --json
-arw review prepare <task-id> --json
+<ARW> task ready <task-id> --json
+<ARW> review prepare <task-id> --json
 ```
 - `review prepare` 会计算 base/head SHA、文件 diff、提交记录、worktree 干净状态及依赖关系。
 - 向用户展示：任务目的、变更文件、精确的 Base...HEAD SHA 范围、自测结果。
@@ -74,7 +78,7 @@ arw review prepare <task-id> --json
 ### 步骤 4：记录人工批准 (Approve)
 **必须在用户明确表示“审查通过”或“同意合并”后**，提取用户审查通过时的 exact base SHA 与 head SHA：
 ```sh
-arw review approve --confirm --base <reviewed-base-sha> --head <reviewed-head-sha> <task-id> --json
+<ARW> review approve --confirm --base <reviewed-base-sha> --head <reviewed-head-sha> <task-id> --json
 ```
 > [!WARNING]
 > 严禁 Agent 自行假定审查通过！若用户审查后代码发生任何变动（HEAD 改变），Core 会自动拒绝过期的审批（stale review）。
@@ -82,7 +86,7 @@ arw review approve --confirm --base <reviewed-base-sha> --head <reviewed-head-sh
 ### 步骤 5：执行本地快进合并 (Merge)
 在用户单独指示合并后执行：
 ```sh
-arw task merge --confirm <task-id> --json
+<ARW> task merge --confirm <task-id> --json
 ```
 - Core 会执行 `--ff-only` 本地快进合并至基线分支。
 - 绝不自动 push 到远程仓库。
@@ -90,7 +94,7 @@ arw task merge --confirm <task-id> --json
 ### 步骤 6：清理资源 (Clear)
 任务合并或废弃后，可清理本地分支和 worktree（台账审计记录永久保留）：
 ```sh
-arw task clear --confirm <task-id> --json
+<ARW> task clear --confirm <task-id> --json
 ```
 
 ## 5. 关键安全红线 (Safety Invariants)

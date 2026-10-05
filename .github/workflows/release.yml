@@ -39,6 +39,13 @@ jobs:
           cp -R skills/agent-review-workflow/scripts dist/agent-review-workflow/scripts
           cp -R skills/agent-review-workflow/references dist/agent-review-workflow/references
           chmod +x dist/agent-review-workflow/scripts/*.sh
+
+          # Bundle installer scripts directly into release package for self-contained installation
+          mkdir -p dist/agent-review-workflow/install
+          cp installers/install-skill.ps1 dist/agent-review-workflow/install/install.ps1
+          cp installers/install-skill.sh dist/agent-review-workflow/install/install.sh
+          chmod +x dist/agent-review-workflow/install/install.sh
+
           find dist/agent-review-workflow/bin -type f -exec chmod +x {} +
 
           # Package self-contained skill archives

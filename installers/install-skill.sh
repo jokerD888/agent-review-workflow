@@ -32,15 +32,63 @@ while [ "$#" -gt 0 ]; do
 done
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
-REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 
-# Locate source skill directory
-if [ -f "$REPO_ROOT/dist/agent-review-workflow/SKILL.md" ]; then
-  SOURCE_SKILL="$REPO_ROOT/dist/agent-review-workflow"
-elif [ -f "$REPO_ROOT/skills/agent-review-workflow/SKILL.md" ]; then
-  SOURCE_SKILL="$REPO_ROOT/skills/agent-review-workflow"
+# 1. If script is in install/ inside release package
+if [ -f "$SCRIPT_DIR/../SKILL.md" ]; then
+  SOURCE_SKILL="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+  REPO_ROOT="$SOURCE_SKILL"
+elif [ -f "$SCRIPT_DIR/SKILL.md" ]; then
+  SOURCE_SKILL="$SCRIPT_DIR"
+  REPO_ROOT="$SOURCE_SKILL"
 else
-  echo "Error: Could not locate agent-review-workflow skill source files." >&2
+  REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+  if [ -f "$REPO_ROOT/dist/agent-review-workflow/SKILL.md" ]; then
+    SOURCE_SKILL="$REPO_ROOT/dist/agent-review-workflow"
+  elif [ -f "$REPO_ROOT/skills/agent-review-workflow/SKILL.md" ]; then
+    SOURCE_SKILL="$REPO_ROOT/skills/agent-review-workflow"
+  else
+    echo "Error: Could not locate agent-review-workflow skill source files." >&2
+    exit 1
+  fi
+fi
+
+# Detect platform to verify binary presence
+UNAME_S="$(uname -s)"
+case "$UNAME_S" in
+  Linux) OS="linux" ;;
+  Darwin) OS="darwin" ;;
+  MINGW*|MSYS*|CYGWIN*) OS="windows" ;;
+  *) OS="linux" ;;
+esac
+
+UNAME_M="$(uname -m)"
+case "$UNAME_M" in
+  x86_64|amd64) ARCH="amd64" ;;
+  aarch64|arm64) ARCH="arm64" ;;
+  *) ARCH="amd64" ;;
+esac
+
+PLATFORM="${OS}-${ARCH}"
+BIN_NAME="arw"
+if [ "$OS" = "windows" ]; then
+  BIN_NAME="arw.exe"
+fi
+
+HAS_PREBUILT_BIN=0
+if [ -d "$SOURCE_SKILL/bin/$PLATFORM" ] || [ -f "$SOURCE_SKILL/bin/$PLATFORM/$BIN_NAME" ]; then
+  HAS_PREBUILT_BIN=1
+fi
+
+HAS_LOCAL_BUILT_BIN=0
+if [ -f "$REPO_ROOT/bin/$BIN_NAME" ]; then
+  HAS_LOCAL_BUILT_BIN=1
+fi
+
+if [ "$HAS_PREBUILT_BIN" -eq 0 ] && [ "$HAS_LOCAL_BUILT_BIN" -eq 0 ]; then
+  echo "Error: No arw binary found for platform '$PLATFORM'." >&2
+  echo "If installing from source, compile the CLI binary first:" >&2
+  echo "  go build -o ./bin/$BIN_NAME ./cmd/arw" >&2
+  echo "Or install using a pre-packaged release package containing bin/." >&2
   exit 1
 fi
 
@@ -50,20 +98,25 @@ get_target_paths() {
   repo_dir=$3
 
   if [ "$scope" = "global" ]; then
+    anti_official="$HOME/.gemini/config/skills/agent-review-workflow"
+    anti_legacy="$HOME/.gemini/antigravity/skills/agent-review-workflow"
     codex_home="${CODEX_HOME:-"$HOME/.codex"}/skills/agent-review-workflow"
     claude_home="$HOME/.claude/skills/agent-review-workflow"
     opencode_home="${XDG_CONFIG_HOME:-"$HOME/.config"}/opencode/skills/agent-review-workflow"
-    antigravity_home="$HOME/.gemini/antigravity/skills/agent-review-workflow"
     generic_home="$HOME/.agents/skills/agent-review-workflow"
 
     case "$host" in
+      antigravity)
+        echo "$anti_official"
+        echo "$anti_legacy"
+        ;;
       codex) echo "$codex_home" ;;
       claude) echo "$claude_home" ;;
       opencode) echo "$opencode_home" ;;
-      antigravity) echo "$antigravity_home" ;;
       generic) echo "$generic_home" ;;
       all)
-        echo "$antigravity_home"
+        echo "$anti_official"
+        echo "$anti_legacy"
         echo "$codex_home"
         echo "$claude_home"
         echo "$opencode_home"
@@ -76,12 +129,24 @@ get_target_paths() {
     esac
   else
     resolved_repo="$(cd -- "$repo_dir" && pwd)"
+    anti_repo="$resolved_repo/.agents/skills/agent-review-workflow"
+    claude_repo="$resolved_repo/.claude/skills/agent-review-workflow"
+    codex_repo="$resolved_repo/.codex/skills/agent-review-workflow"
+    opencode_repo="$resolved_repo/.opencode/skills/agent-review-workflow"
+    generic_repo="$resolved_repo/.agents/skills/agent-review-workflow"
+
     case "$host" in
-      codex) echo "$resolved_repo/.codex/skills/agent-review-workflow" ;;
-      claude) echo "$resolved_repo/.claude/skills/agent-review-workflow" ;;
-      opencode) echo "$resolved_repo/.opencode/skills/agent-review-workflow" ;;
-      antigravity) echo "$resolved_repo/.agents/skills/agent-review-workflow" ;;
-      generic|all) echo "$resolved_repo/.agents/skills/agent-review-workflow" ;;
+      antigravity) echo "$anti_repo" ;;
+      claude) echo "$claude_repo" ;;
+      codex) echo "$codex_repo" ;;
+      opencode) echo "$opencode_repo" ;;
+      generic) echo "$generic_repo" ;;
+      all)
+        echo "$anti_repo"
+        echo "$claude_repo"
+        echo "$codex_repo"
+        echo "$opencode_repo"
+        ;;
       *)
         echo "Unknown host: $host" >&2
         exit 1
@@ -123,28 +188,16 @@ echo "$TARGETS" | while IFS= read -r target; do
     cp -R "$SOURCE_SKILL/references/"* "$target/references/"
   fi
 
-  # Copy bin if available
-  if [ -d "$SOURCE_SKILL/bin" ]; then
-    mkdir -p "$target/bin"
-    cp -R "$SOURCE_SKILL/bin/"* "$target/bin/"
-    # Ensure binary execution permissions
-    find "$target/bin" -type f -exec chmod +x {} + 2>/dev/null || true
-  elif [ -f "$REPO_ROOT/bin/arw" ]; then
-    UNAME_S="$(uname -s)"
-    case "$UNAME_S" in
-      Linux) OS="linux" ;;
-      Darwin) OS="darwin" ;;
-      *) OS="linux" ;;
-    esac
-    UNAME_M="$(uname -m)"
-    case "$UNAME_M" in
-      x86_64|amd64) ARCH="amd64" ;;
-      aarch64|arm64) ARCH="arm64" ;;
-      *) ARCH="amd64" ;;
-    esac
-    mkdir -p "$target/bin/${OS}-${ARCH}"
-    cp "$REPO_ROOT/bin/arw" "$target/bin/${OS}-${ARCH}/arw"
-    chmod +x "$target/bin/${OS}-${ARCH}/arw"
+  # Copy bin
+  dest_bin="$target/bin"
+  if [ "$HAS_PREBUILT_BIN" -eq 1 ]; then
+    mkdir -p "$dest_bin"
+    cp -R "$SOURCE_SKILL/bin/"* "$dest_bin/"
+    find "$dest_bin" -type f -exec chmod +x {} + 2>/dev/null || true
+  elif [ "$HAS_LOCAL_BUILT_BIN" -eq 1 ]; then
+    mkdir -p "$dest_bin/$PLATFORM"
+    cp "$REPO_ROOT/bin/$BIN_NAME" "$dest_bin/$PLATFORM/$BIN_NAME"
+    chmod +x "$dest_bin/$PLATFORM/$BIN_NAME" 2>/dev/null || true
   fi
 
   echo "Installed skill to: $target"

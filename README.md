@@ -24,62 +24,74 @@ ARW Core (Unique Truth Source) ┤
 
 ---
 
-## Skill 原生分发 (Skill Distribution)
+## Skill 原生分发与安装 (Skill Distribution)
 
-ARW 默认通过 Agent Skill 分发，无需修改用户系统的全局 `PATH`，也不会向日常 Agent 的全局指令文件中粗暴注入长篇规则。
+ARW 默认通过 Agent Skill 分发，无需修改用户系统 `PATH`，也不会向全局指令文件注入长篇规则。
 
-### 1. 作用域支持 (Scopes)
+### 方式 A：使用 GitHub Release 预编译包（推荐，开箱即用）
 
-- **Global Skill**（推荐个人开发）：安装在用户主目录下的 Agent Skill 目录中（多项目共享、按需激活）。
-- **Repo-scoped Skill**（推荐团队与 CI）：安装在项目仓库根目录下（如 `.agents/skills/agent-review-workflow`），与项目版本绑定。
+Release 发布包是完全**自包含（Self-Contained）**的，内置了所有平台的二进制和安装脚本：
 
-### 2. 安装 Skill
+1. 从 [Releases 页面](https://github.com/jokerD888/agent-review-workflow/releases) 下载最新版本的 `agent-review-workflow.zip` 或 `agent-review-workflow.tar.gz` 并解压；
+2. 进入解压后的目录，直接运行内置安装脚本：
 
-使用仓库提供的轻量安装脚本：
-
-#### Windows (PowerShell)
 ```powershell
-# 安装为全局 Skill (默认支持 Antigravity, Codex, Claude, OpenCode)
+# Windows PowerShell
+.\install\install.ps1 -Scope global
+```
+
+```sh
+# macOS / Linux
+sh ./install/install.sh --scope global
+```
+
+脚本将自动定位本地预编译二进制并分发到对应宿主的标准 Skill 路径中。
+
+---
+
+### 方式 B：从源码仓库编译与安装
+
+如果直接克隆了源码仓库，必须**先编译 CLI 二进制**，再运行安装器（安装器具备防呆校验，未编译前将拒绝安装）：
+
+#### 1. 编译 ARW CLI
+环境要求：Git 与 Go 1.26+。在仓库根目录执行：
+```powershell
+# Windows
+go build -o ./bin/arw.exe ./cmd/arw
+```
+```sh
+# macOS / Linux
+go build -o ./bin/arw ./cmd/arw
+```
+
+#### 2. 安装 Skill 到 Agent 宿主
+
+```powershell
+# Windows: 全局安装 (支持 Antigravity, Claude, Codex, OpenCode)
 .\installers\install-skill.ps1 -Scope global
 
-# 安装为指定仓库的 Repo Skill
+# Windows: 安装为当前仓库专属的 Repo Skill
 .\installers\install-skill.ps1 -Scope repo -TargetRepo path\to\your\project
 ```
 
-#### macOS / Linux (POSIX Shell)
 ```sh
-# 安装为全局 Skill
+# macOS / Linux: 全局安装
 sh ./installers/install-skill.sh --scope global
 
-# 安装为指定仓库的 Repo Skill
+# macOS / Linux: 安装为当前仓库专属的 Repo Skill
 sh ./installers/install-skill.sh --scope repo --target-repo /path/to/your/project
 ```
 
 ---
 
-## 快速上手 (Quick Start)
+## Agent 调用约定 (Wrapper Invocation)
 
-### 1. 编译 ARW CLI
-环境要求：Git 与 Go 1.26+。在仓库根目录执行：
-```powershell
-go build -o ./bin/arw.exe ./cmd/arw
-```
+在任何 Agent 交互中，**必须通过 Wrapper 脚本调用**，严禁直接寻找 PATH 中的 `arw`：
 
-### 2. 通过 Wrapper 或 CLI 运行
-在任何 Git 仓库中初始化 ARW 台账分支：
-```powershell
-.\skills\agent-review-workflow\scripts\arw.ps1 setup --json
-```
+- **Windows**: `powershell -ExecutionPolicy Bypass -File <skill-dir>/scripts/arw.ps1 <command> ... --json`
+- **macOS / Linux**: `<skill-dir>/scripts/arw.sh <command> ... --json`
 
-创建第一个受隔离的任务：
-```powershell
-.\skills\agent-review-workflow\scripts\arw.ps1 task start --id fix-login "修复登录跳转" --json
-```
-
-查看任务列表：
-```powershell
-.\skills\agent-review-workflow\scripts\arw.ps1 task list --json
-```
+以下主生命周期统一使用 `<ARW>` 指代当前平台对应的 Wrapper 命令。
 
 ---
 
@@ -91,15 +103,36 @@ go build -o ./bin/arw.exe ./cmd/arw
 [Clear 清理] ◄── [FF Merge 快进合并] ◄── [用户人工审查批准] ◄┘
 ```
 
-1. **`arw task start --id <id> "<title>" --json`**：创建独立任务分支 `arw/<id>` 与专属物理隔离 worktree；
+1. **创建任务**：
+   ```sh
+   <ARW> task start --id <id> "<title>" --json
+   ```
+   创建独立任务分支 `arw/<id>` 与专属物理隔离 worktree；
 2. **在 Worktree 中开发**：仅修改当前任务相关代码并提交独立 commit；
-3. **`arw task ready <id> --json`**：标记任务就绪；
-4. **`arw review prepare <id> --json`**：生成审查快照，包含 Base...HEAD SHA 范围、修改文件 diff、依赖与工作区状态；
+3. **标记任务就绪**：
+   ```sh
+   <ARW> task ready <id> --json
+   ```
+4. **生成审查快照**：
+   ```sh
+   <ARW> review prepare <id> --json
+   ```
+   包含 Base...HEAD SHA 范围、修改文件 diff、依赖与工作区状态；
 5. **用户人工审查并批准**：用户明确批准后，调用：
-   `arw review approve --confirm --base <reviewed-base-sha> --head <reviewed-head-sha> <id> --json`
+   ```sh
+   <ARW> review approve --confirm --base <reviewed-base-sha> --head <reviewed-head-sha> <id> --json
+   ```
    若代码在审查后发生变动，Core 将自动拒绝并报告失效；
-6. **`arw task merge --confirm <id> --json`**：严格 fast-forward 快进合入基线，绝不自动 push；
-7. **`arw task clear --confirm <id> --json`**：清理分支和物理工作区，永久保留不可变审计台账。
+6. **快进合并**：
+   ```sh
+   <ARW> task merge --confirm <id> --json
+   ```
+   严格 fast-forward 快进合入基线，绝不自动 push；
+7. **清理物理工作区**：
+   ```sh
+   <ARW> task clear --confirm <id> --json
+   ```
+   清理分支和物理工作区，永久保留不可变审计台账。
 
 ---
 

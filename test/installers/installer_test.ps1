@@ -16,13 +16,17 @@ try {
     $env:USERPROFILE = $tempHome
     $env:CODEX_HOME = Join-Path $tempHome '.codex'
 
-    # Test Global Installation for Antigravity
+    # Test Global Installation for Antigravity (checks official config path)
     & $installerPs1 -Scope global -HostTarget antigravity -Force
-    $antiSkill = Join-Path $tempHome '.gemini\antigravity\skills\agent-review-workflow\SKILL.md'
-    if (-not (Test-Path -LiteralPath $antiSkill)) {
-        throw "Global antigravity skill was not installed at: $antiSkill"
+    $antiOfficial = Join-Path $tempHome '.gemini\config\skills\agent-review-workflow\SKILL.md'
+    $antiLegacy = Join-Path $tempHome '.gemini\antigravity\skills\agent-review-workflow\SKILL.md'
+    if (-not (Test-Path -LiteralPath $antiOfficial)) {
+        throw "Official Antigravity skill path was not installed at: $antiOfficial"
     }
-    Write-Host "PASS: Global antigravity skill installed"
+    if (-not (Test-Path -LiteralPath $antiLegacy)) {
+        throw "Legacy Antigravity skill path was not installed at: $antiLegacy"
+    }
+    Write-Host "PASS: Global antigravity official and fallback skills installed"
 
     # Test Global Installation for Codex
     & $installerPs1 -Scope global -HostTarget codex -Force
@@ -32,15 +36,21 @@ try {
     }
     Write-Host "PASS: Global codex skill installed"
 
-    # Test Repo-scoped Installation
+    # Test Repo-scoped Installation for ALL hosts
     $tempRepo = Join-Path $tempHome 'test-repo'
     New-Item -ItemType Directory -Path $tempRepo -Force | Out-Null
-    & $installerPs1 -Scope repo -HostTarget generic -TargetRepo $tempRepo -Force
-    $repoSkill = Join-Path $tempRepo '.agents\skills\agent-review-workflow\SKILL.md'
-    if (-not (Test-Path -LiteralPath $repoSkill)) {
-        throw "Repo-scoped skill was not installed at: $repoSkill"
-    }
-    Write-Host "PASS: Repo-scoped skill installed"
+    & $installerPs1 -Scope repo -HostTarget all -TargetRepo $tempRepo -Force
+
+    $agentsSkill = Join-Path $tempRepo '.agents\skills\agent-review-workflow\SKILL.md'
+    $claudeSkill = Join-Path $tempRepo '.claude\skills\agent-review-workflow\SKILL.md'
+    $codexRepoSkill = Join-Path $tempRepo '.codex\skills\agent-review-workflow\SKILL.md'
+    $opencodeSkill = Join-Path $tempRepo '.opencode\skills\agent-review-workflow\SKILL.md'
+
+    if (-not (Test-Path -LiteralPath $agentsSkill)) { throw "Repo skill missing at: $agentsSkill" }
+    if (-not (Test-Path -LiteralPath $claudeSkill)) { throw "Claude repo skill missing at: $claudeSkill" }
+    if (-not (Test-Path -LiteralPath $codexRepoSkill)) { throw "Codex repo skill missing at: $codexRepoSkill" }
+    if (-not (Test-Path -LiteralPath $opencodeSkill)) { throw "OpenCode repo skill missing at: $opencodeSkill" }
+    Write-Host "PASS: Repo-scoped skills installed across all host directories (.agents, .claude, .codex, .opencode)"
 
     # Test That Wrapper In Installed Skill Can Execute
     $wrapperInSkill = Join-Path $tempRepo '.agents\skills\agent-review-workflow\scripts\arw.ps1'
