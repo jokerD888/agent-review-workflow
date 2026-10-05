@@ -1,5 +1,9 @@
 # Personal AI development workflow
 
+> [!NOTE]
+> **[DEPRECATED for ARW workflow]** This monolithic rule file is preserved for legacy installer compatibility.
+> Modern ARW distributes via the native Agent Skill in `skills/agent-review-workflow/` without global instruction file pollution.
+
 ## Git safety
 
 - Before editing a Git repository, inspect the current branch and working tree.

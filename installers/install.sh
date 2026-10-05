@@ -1,6 +1,8 @@
 #!/usr/bin/env sh
 set -eu
 
+echo "WARNING: [DEPRECATED] install.sh is the legacy monolithic installer. ARW v2 now natively distributes via Agent Skills (Core + CLI + Wrapper Skill). Use installers/install-skill.sh instead." >&2
+
 REPOSITORY='jokerD888/agent-review-workflow'
 VERSION='latest'
 CONFIGURE_AGENTS=0

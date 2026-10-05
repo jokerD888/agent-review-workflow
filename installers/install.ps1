@@ -5,6 +5,7 @@ param(
     [switch]$Force
 )
 
+Write-Warning "[DEPRECATED] install.ps1 is the legacy monolithic installer. ARW v2 now natively distributes via Agent Skills (Core + CLI + Wrapper Skill). Use installers/install-skill.ps1 instead."
 $ErrorActionPreference = 'Stop'
 $Repository = 'jokerD888/agent-review-workflow'
 $RuntimeRoot = Join-Path $env:LOCALAPPDATA 'AgentReviewWorkflow'

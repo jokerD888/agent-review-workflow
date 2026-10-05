@@ -16,21 +16,51 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v6
         with: { go-version: "1.26.x" }
-      - name: Build ARW binaries
+      - name: Build ARW Self-Contained Skill and Binaries
         shell: bash
         run: |
-          mkdir -p dist
-          GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w -X main.version=${{ github.ref_name }}" -o dist/arw_windows_amd64.exe ./cmd/arw
-          GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w -X main.version=${{ github.ref_name }}" -o dist/arw_linux_amd64 ./cmd/arw
-          GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w -X main.version=${{ github.ref_name }}" -o dist/arw_linux_arm64 ./cmd/arw
+          mkdir -p dist/agent-review-workflow/bin/windows-amd64
+          mkdir -p dist/agent-review-workflow/bin/windows-arm64
+          mkdir -p dist/agent-review-workflow/bin/linux-amd64
+          mkdir -p dist/agent-review-workflow/bin/linux-arm64
+          mkdir -p dist/agent-review-workflow/bin/darwin-amd64
+          mkdir -p dist/agent-review-workflow/bin/darwin-arm64
+
+          # Cross-compile CLI binaries for all supported platforms
+          GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w -X main.version=${{ github.ref_name }}" -o dist/agent-review-workflow/bin/windows-amd64/arw.exe ./cmd/arw
+          GOOS=windows GOARCH=arm64 go build -trimpath -ldflags="-s -w -X main.version=${{ github.ref_name }}" -o dist/agent-review-workflow/bin/windows-arm64/arw.exe ./cmd/arw
+          GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w -X main.version=${{ github.ref_name }}" -o dist/agent-review-workflow/bin/linux-amd64/arw ./cmd/arw
+          GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w -X main.version=${{ github.ref_name }}" -o dist/agent-review-workflow/bin/linux-arm64/arw ./cmd/arw
+          GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags="-s -w -X main.version=${{ github.ref_name }}" -o dist/agent-review-workflow/bin/darwin-amd64/arw ./cmd/arw
+          GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags="-s -w -X main.version=${{ github.ref_name }}" -o dist/agent-review-workflow/bin/darwin-arm64/arw ./cmd/arw
+
+          # Copy skill definitions, scripts, and references
+          cp skills/agent-review-workflow/SKILL.md dist/agent-review-workflow/SKILL.md
+          cp -R skills/agent-review-workflow/scripts dist/agent-review-workflow/scripts
+          cp -R skills/agent-review-workflow/references dist/agent-review-workflow/references
+          chmod +x dist/agent-review-workflow/scripts/*.sh
+          find dist/agent-review-workflow/bin -type f -exec chmod +x {} +
+
+          # Package self-contained skill archives
+          (cd dist && tar -czf agent-review-workflow.tar.gz agent-review-workflow)
+          (cd dist && zip -r agent-review-workflow.zip agent-review-workflow)
+
+          # Build standalone MCP binaries (Optional Adapter)
           GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w -X main.version=${{ github.ref_name }}" -o dist/arw-mcp_windows_amd64.exe ./cmd/arw-mcp
           GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w -X main.version=${{ github.ref_name }}" -o dist/arw-mcp_linux_amd64 ./cmd/arw-mcp
           GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w -X main.version=${{ github.ref_name }}" -o dist/arw-mcp_linux_arm64 ./cmd/arw-mcp
-      - name: Include managed agent rules
-        run: cp rules/global.md dist/arw-global-rules.md
+          GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags="-s -w -X main.version=${{ github.ref_name }}" -o dist/arw-mcp_darwin_amd64 ./cmd/arw-mcp
+          GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags="-s -w -X main.version=${{ github.ref_name }}" -o dist/arw-mcp_darwin_arm64 ./cmd/arw-mcp
+
+          # Legacy release installer compatibility assets
+          cp dist/agent-review-workflow/bin/windows-amd64/arw.exe dist/arw_windows_amd64.exe
+          cp dist/agent-review-workflow/bin/linux-amd64/arw dist/arw_linux_amd64
+          cp dist/agent-review-workflow/bin/linux-arm64/arw dist/arw_linux_arm64
+          if [ -f rules/global.md ]; then cp rules/global.md dist/arw-global-rules.md; fi
+
       - name: Create checksums
         working-directory: dist
-        run: sha256sum * > checksums.txt
+        run: sha256sum * > checksums.txt || true
       - name: Attest release artifacts
         uses: actions/attest-build-provenance@v2
         with:
@@ -38,4 +68,10 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-          files: dist/*
+          files: |
+            dist/agent-review-workflow.tar.gz
+            dist/agent-review-workflow.zip
+            dist/arw-mcp_*
+            dist/arw_*
+            dist/arw-global-rules.md
+            dist/checksums.txt

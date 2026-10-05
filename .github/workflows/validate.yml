@@ -5,6 +5,36 @@ on:
   pull_request:
 
 jobs:
+  validate-skill-wrapper-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with: { go-version: "1.26.x" }
+      - name: Build local arw binary
+        run: go build -o bin/arw.exe ./cmd/arw
+      - name: Run PowerShell wrapper tests
+        shell: pwsh
+        run: ./test/wrapper/wrapper_test.ps1
+      - name: Run PowerShell installer tests
+        shell: pwsh
+        run: ./test/installers/installer_test.ps1
+
+  validate-skill-wrapper-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with: { go-version: "1.26.x" }
+      - name: Build local arw binary
+        run: go build -o bin/arw ./cmd/arw
+      - name: Run POSIX wrapper tests
+        shell: bash
+        run: bash ./test/wrapper/wrapper_test.sh
+      - name: Run POSIX installer tests
+        shell: bash
+        run: bash ./test/installers/installer_test.sh
+
   windows-release-installer:
     runs-on: windows-latest
     steps:

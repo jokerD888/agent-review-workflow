@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -16,19 +17,32 @@ import (
 var version = "0.2.0-dev"
 
 func main() {
-	if err := run(os.Args[1:]); err != nil {
-		fmt.Fprintln(os.Stderr, "arw:", err)
+	if err := runWithIO(os.Args[1:], os.Stdout, os.Stderr); err != nil {
+		if hasJSON(os.Args[1:]) {
+			payload, _ := json.Marshal(map[string]string{"error": err.Error()})
+			fmt.Fprintln(os.Stderr, string(payload))
+		} else {
+			fmt.Fprintln(os.Stderr, "arw:", err)
+		}
 		os.Exit(1)
 	}
 }
 
 func run(args []string) error {
-	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
-		printHelp()
+	return runWithIO(args, os.Stdout, os.Stderr)
+}
+
+func runWithIO(args []string, stdout, stderr io.Writer) error {
+	cleanArgs, globalJSON := withoutFormat(args)
+	if len(cleanArgs) == 0 || cleanArgs[0] == "help" || cleanArgs[0] == "--help" || cleanArgs[0] == "-h" {
+		printHelp(stdout)
 		return nil
 	}
-	if args[0] == "version" {
-		fmt.Println(version)
+	if cleanArgs[0] == "version" {
+		if globalJSON {
+			return outputWriter(map[string]string{"version": version}, true, stdout)
+		}
+		fmt.Fprintln(stdout, version)
 		return nil
 	}
 	dir, err := os.Getwd()
@@ -39,29 +53,36 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
-	switch args[0] {
+	switch cleanArgs[0] {
 	case "setup":
-		return svc.Setup()
+		if err := svc.Setup(); err != nil {
+			return err
+		}
+		if globalJSON {
+			return outputWriter(map[string]any{"status": "ok", "message": "registry initialized"}, true, stdout)
+		}
+		return nil
 	case "doctor":
-		return doctor(svc, hasJSON(args))
+		return doctor(svc, globalJSON || hasJSON(args), stdout)
 	case "task":
-		return taskCommand(svc, args[1:])
+		return taskCommand(svc, cleanArgs[1:], globalJSON, stdout, stderr)
 	case "review":
-		return reviewCommand(svc, args[1:])
+		return reviewCommand(svc, cleanArgs[1:], globalJSON, stdout, stderr)
 	default:
-		return fmt.Errorf("unknown command %q; run 'arw help'", args[0])
+		return fmt.Errorf("unknown command %q; run 'arw help'", cleanArgs[0])
 	}
 }
 
-func taskCommand(svc app.Service, args []string) error {
-	args, jsonOutput := withoutFormat(args)
+func taskCommand(svc app.Service, args []string, globalJSON bool, stdout, stderr io.Writer) error {
+	args, localJSON := withoutFormat(args)
+	jsonOutput := globalJSON || localJSON
 	if len(args) == 0 {
 		return errors.New("usage: arw task <start|list|show|park|resume|ready|merge|abandon|clear> ...")
 	}
 	switch args[0] {
 	case "start":
 		fs := flag.NewFlagSet("task start", flag.ContinueOnError)
-		fs.SetOutput(os.Stderr)
+		fs.SetOutput(stderr)
 		id := fs.String("id", "", "task id")
 		base := fs.String("base", "main", "base Git ref")
 		parent := fs.String("parent", "", "parent task id")
@@ -78,10 +99,10 @@ func taskCommand(svc app.Service, args []string) error {
 		if err != nil {
 			return err
 		}
-		return output(result, *format == "json" || jsonOutput)
+		return outputWriter(result, *format == "json" || jsonOutput, stdout)
 	case "list":
 		fs := flag.NewFlagSet("task list", flag.ContinueOnError)
-		fs.SetOutput(os.Stderr)
+		fs.SetOutput(stderr)
 		view := fs.String("view", "", "reviewable|active|parked|blocked")
 		format := fs.String("format", "", "output format")
 		if err := fs.Parse(args[1:]); err != nil {
@@ -92,7 +113,7 @@ func taskCommand(svc app.Service, args []string) error {
 			return err
 		}
 		entries = filter(entries, *view)
-		return output(entries, *format == "json" || jsonOutput)
+		return outputWriter(entries, *format == "json" || jsonOutput, stdout)
 	case "show":
 		if len(args) < 2 {
 			return errors.New("usage: arw task show <task-id> [--format json]")
@@ -101,7 +122,7 @@ func taskCommand(svc app.Service, args []string) error {
 		if err != nil {
 			return err
 		}
-		return output(entry, jsonOutput)
+		return outputWriter(entry, jsonOutput, stdout)
 	case "park":
 		if len(args) < 2 {
 			return errors.New("usage: arw task park <task-id> [--format json]")
@@ -110,7 +131,7 @@ func taskCommand(svc app.Service, args []string) error {
 		if err != nil {
 			return err
 		}
-		return output(entry, jsonOutput)
+		return outputWriter(entry, jsonOutput, stdout)
 	case "resume":
 		if len(args) < 2 {
 			return errors.New("usage: arw task resume <task-id> [--format json]")
@@ -119,7 +140,7 @@ func taskCommand(svc app.Service, args []string) error {
 		if err != nil {
 			return err
 		}
-		return output(entry, jsonOutput)
+		return outputWriter(entry, jsonOutput, stdout)
 	case "ready":
 		if len(args) != 2 {
 			return errors.New("usage: arw task ready <task-id> [--format json]")
@@ -128,7 +149,7 @@ func taskCommand(svc app.Service, args []string) error {
 		if err != nil {
 			return err
 		}
-		return output(entry, jsonOutput)
+		return outputWriter(entry, jsonOutput, stdout)
 	case "merge":
 		mergeArgs, confirm := stripBool(args[1:], "--confirm")
 		if len(mergeArgs) != 1 || !confirm {
@@ -138,7 +159,7 @@ func taskCommand(svc app.Service, args []string) error {
 		if err != nil {
 			return err
 		}
-		return output(result, jsonOutput)
+		return outputWriter(result, jsonOutput, stdout)
 	case "abandon":
 		abandonArgs, confirm := stripBool(args[1:], "--confirm")
 		if len(abandonArgs) != 1 || !confirm {
@@ -148,7 +169,7 @@ func taskCommand(svc app.Service, args []string) error {
 		if err != nil {
 			return err
 		}
-		return output(entry, jsonOutput)
+		return outputWriter(entry, jsonOutput, stdout)
 	case "clear":
 		clearArgs, confirm := stripBool(args[1:], "--confirm")
 		if !confirm {
@@ -159,14 +180,14 @@ func taskCommand(svc app.Service, args []string) error {
 			if err != nil {
 				return err
 			}
-			return output(result, jsonOutput)
+			return outputWriter(result, jsonOutput, stdout)
 		}
 		if len(clearArgs) == 0 {
 			results, err := svc.ClearMerged()
 			if err != nil {
 				return err
 			}
-			return output(results, jsonOutput)
+			return outputWriter(results, jsonOutput, stdout)
 		}
 		return errors.New("usage: arw task clear --confirm <task-id> | arw task clear --all-merged --confirm")
 	default:
@@ -174,8 +195,9 @@ func taskCommand(svc app.Service, args []string) error {
 	}
 }
 
-func reviewCommand(svc app.Service, args []string) error {
-	args, jsonOutput := withoutFormat(args)
+func reviewCommand(svc app.Service, args []string, globalJSON bool, stdout, stderr io.Writer) error {
+	args, localJSON := withoutFormat(args)
+	jsonOutput := globalJSON || localJSON
 	if len(args) == 0 {
 		return errors.New("usage: arw review <prepare|approve|request-changes> <task-id>")
 	}
@@ -188,14 +210,14 @@ func reviewCommand(svc app.Service, args []string) error {
 		if err != nil {
 			return err
 		}
-		return output(snapshot, jsonOutput)
+		return outputWriter(snapshot, jsonOutput, stdout)
 	case "approve":
 		approveArgs, confirm := stripBool(args[1:], "--confirm")
 		if !confirm {
 			return errors.New("approval changes the task audit record; repeat with --confirm after human review")
 		}
 		fs := flag.NewFlagSet("review approve", flag.ContinueOnError)
-		fs.SetOutput(os.Stderr)
+		fs.SetOutput(stderr)
 		expectedBase := fs.String("base", "", "reviewed base SHA")
 		expectedHead := fs.String("head", "", "reviewed HEAD SHA")
 		if err := fs.Parse(approveArgs); err != nil {
@@ -208,13 +230,13 @@ func reviewCommand(svc app.Service, args []string) error {
 		if err != nil {
 			return err
 		}
-		return output(struct {
+		return outputWriter(struct {
 			Task     task.Task `json:"task"`
 			Snapshot any       `json:"snapshot"`
-		}{entry, snapshot}, jsonOutput)
+		}{entry, snapshot}, jsonOutput, stdout)
 	case "request-changes":
 		fs := flag.NewFlagSet("review request-changes", flag.ContinueOnError)
-		fs.SetOutput(os.Stderr)
+		fs.SetOutput(stderr)
 		reason := fs.String("reason", "", "reason")
 		format := fs.String("format", "", "output format")
 		if err := fs.Parse(args[1:]); err != nil {
@@ -227,20 +249,21 @@ func reviewCommand(svc app.Service, args []string) error {
 		if err != nil {
 			return err
 		}
-		return output(entry, *format == "json" || jsonOutput)
+		return outputWriter(entry, *format == "json" || jsonOutput, stdout)
 	default:
 		return fmt.Errorf("unknown review command %q", args[0])
 	}
 }
 
-func doctor(svc app.Service, jsonOutput bool) error {
+func doctor(svc app.Service, jsonOutput bool, stdout io.Writer) error {
 	entries, err := svc.Tasks()
 	if err != nil && !strings.Contains(err.Error(), "not found") {
 		return err
 	}
 	data := map[string]any{"version": version, "repository": svc.Git.Root, "registryBranch": ledger.RegistryBranch, "registryExists": svc.Git.BranchExists(ledger.RegistryBranch), "tasks": len(entries)}
-	return output(data, jsonOutput)
+	return outputWriter(data, jsonOutput, stdout)
 }
+
 func filter(entries []task.Task, view string) []task.Task {
 	if view == "" {
 		return entries
@@ -303,40 +326,46 @@ func stripBool(args []string, name string) ([]string, bool) {
 	}
 	return clean, found
 }
+
 func output(value any, jsonOutput bool) error {
+	return outputWriter(value, jsonOutput, os.Stdout)
+}
+
+func outputWriter(value any, jsonOutput bool, stdout io.Writer) error {
 	if jsonOutput {
-		encoder := json.NewEncoder(os.Stdout)
+		encoder := json.NewEncoder(stdout)
 		encoder.SetIndent("", "  ")
 		return encoder.Encode(value)
 	}
 	switch v := value.(type) {
 	case []task.Task:
 		for _, entry := range v {
-			fmt.Printf("%-28s %-18s %-18s %s\n", entry.ID, entry.Lifecycle, entry.Review.Status, entry.Title)
+			fmt.Fprintf(stdout, "%-28s %-18s %-18s %s\n", entry.ID, entry.Lifecycle, entry.Review.Status, entry.Title)
 		}
 		return nil
 	default:
-		encoder := json.NewEncoder(os.Stdout)
+		encoder := json.NewEncoder(stdout)
 		encoder.SetIndent("", "  ")
 		return encoder.Encode(value)
 	}
 }
-func printHelp() {
-	fmt.Print(`ARW v2 (development)
+
+func printHelp(w io.Writer) {
+	fmt.Fprint(w, `ARW v2 (development)
 
 Usage:
-  arw setup | doctor
-  arw task start [--id id] [--base ref] [--parent task-id] <title>
-  arw task list [--view reviewable|active|parked|blocked]
-  arw task show|park|resume|ready <task-id>
-  arw task merge --confirm <task-id>
-  arw task abandon --confirm <task-id>
-  arw task clear --confirm <task-id>
-  arw task clear --confirm                  # clear all merged/abandoned
-  arw review prepare <task-id>
-  arw review approve --confirm --base <sha> --head <sha> <task-id>
-  arw review request-changes <task-id> [--reason text]
+  arw setup | doctor [--json]
+  arw task start [--id id] [--base ref] [--parent task-id] [--json] <title>
+  arw task list [--view reviewable|active|parked|blocked] [--json]
+  arw task show|park|resume|ready <task-id> [--json]
+  arw task merge --confirm <task-id> [--json]
+  arw task abandon --confirm <task-id> [--json]
+  arw task clear --confirm <task-id> [--json]
+  arw task clear --confirm [--json]         # clear all merged/abandoned
+  arw review prepare <task-id> [--json]
+  arw review approve --confirm --base <sha> --head <sha> <task-id> [--json]
+  arw review request-changes <task-id> [--reason text] [--json]
 
-Add --format json to receive the stable machine interface.
+Add --json or --format json to receive the stable machine interface.
 `)
 }
