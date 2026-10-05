@@ -81,7 +81,7 @@ jobs:
           test_root="$(mktemp -d)"
           fixture="$test_root/fixture"
           mock_bin="$test_root/mock-bin"
-          mkdir -p "$fixture" "$mock_bin"
+          mkdir -p "$fixture" "$mock_bin" "$test_root/home"
           printf 'arw' > "$fixture/arw_linux_amd64"
           printf 'arw-mcp' > "$fixture/arw-mcp_linux_amd64"
           printf '# test rules\n' > "$fixture/arw-global-rules.md"

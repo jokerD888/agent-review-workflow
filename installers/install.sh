@@ -30,6 +30,7 @@ ensure_bin_on_path() {
   profile_start='# agent-review-workflow:path:begin'
   profile_end='# agent-review-workflow:path:end'
   cleaned="$TMP/cleaned-profile"
+  mkdir -p "$(dirname -- "$profile_path")"
   if [ -f "$profile_path" ]; then
     awk -v start="$profile_start" -v end="$profile_end" '$0 == start { inside=1; next } $0 == end { inside=0; next } !inside { print }' "$profile_path" > "$cleaned"
   else
